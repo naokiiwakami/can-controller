@@ -24,6 +24,14 @@ extern uint8_t can_init();
 extern can_message_t *can_create_message();
 extern void can_free_message(can_message_t *message);
 
+/**
+ * Sends a CAN message.
+ *
+ * @param message Message to send. The passed message must be created by
+ * can_create_message(). Also note that the message content is overwritten for
+ * performance in this method. If you need the values after calling this
+ * function, save them before calling.
+ */
 extern void can_send_message(can_message_t *message);
 
 /**

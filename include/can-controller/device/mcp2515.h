@@ -216,12 +216,6 @@ extern uint8_t *mcp2515_read(uint8_t address, uint8_t *buffer, size_t length);
 extern void mcp2515_write_register(uint8_t address, uint8_t value);
 extern uint8_t mcp2515_read_register(uint8_t address);
 extern void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data);
-
-// device specific utility methods
-extern int mcp2515_set_can_id_std(uint8_t *buffer, uint16_t id,
-                                  uint8_t data_length);
-extern void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
-                                                 size_t buffer_length);
 #ifdef __cplusplus
 }
 #endif

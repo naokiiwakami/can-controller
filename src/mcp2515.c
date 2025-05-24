@@ -19,7 +19,7 @@ static void mcp2515_configure_receive_buffer_1();
 static void mcp2515_configure_RXnBF_pins();
 static void mcp2515_handle_rx();
 
-uint8_t mcp2515_init() {
+uint8_t can_init() {
   if (platform_init_mcp2515_spi()) {
     return 1;
   }
@@ -185,42 +185,16 @@ void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data) {
   platform_write_spi(buf, 4);
 }
 
-static void mcp2515_parse_rx_message() {
-  // auto *message = queue_reserve_item();
-  can_message_t *message = can_create_message();
-  uint8_t buffer[16];
-  uint8_t *out_buffer = mcp2515_read(RXB0SIDH, buffer, 13);
-  uint16_t sid =
-      ((uint16_t)out_buffer[RXBnSIDH]) << 3 | out_buffer[RXBnSIDL] >> 5;
-  message->is_extended = out_buffer[RXBnSIDL] & (1 << RXBnSIDL_IDE_BIT);
-  if (message->is_extended) {
-    uint32_t eid = out_buffer[RXBnSIDL] & 0x3;
-    eid <<= 8;
-    eid |= out_buffer[RXBnEID8];
-    eid <<= 8;
-    eid |= out_buffer[RXBnEID0];
-    eid |= sid << 18;
-    message->id = eid;
-    message->is_remote = out_buffer[RXBnDLC] & (1 << RXBnDLC_RTR_BIT);
-  } else {
-    message->id = sid;
-    message->is_remote = out_buffer[RXBnSIDL] & (1 << RXBnSIDL_SRR_BIT);
-  }
-  message->data_length = out_buffer[RXBnDLC] & RXBnDLC_DLC_MASK;
-  if (!message->is_remote && message->data_length > 0) {
-    // TODO: Eliminate this copy
-    memcpy(message->data, out_buffer + RXBnD0, message->data_length);
-  }
-  can_consume_rx_message(message);
-}
+inline static int mcp2515_set_can_id_std(can_message_t *message,
+                                         uint8_t *buffer) {
+  uint32_t id = message->id;
+  uint32_t is_remote = message->is_remote;
+  uint8_t data_length = message->data_length;
 
-void mcp2515_handle_rx() {
-  mcp2515_bit_modify(CANINTF, (1 << CANINTF_RX0IF_BIT), 0);
-  mcp2515_parse_rx_message();
-}
+  int index = 2;  // skips SPI request and the register address
 
-int mcp2515_set_can_id_std(uint8_t *buffer, uint16_t id, uint8_t data_length) {
-  int index = 2;  // skip instruction and address
+  // SPI data part
+  //
   //               7     6     5     4     3     2     1     0
   // TXBnSIDH: SID10  SID9  SID8  SID7  SID6  SID5  SID4  SID3
   // TXBnSIDL:  SID2  SID1  SID0   -   EXIDE   -   EID17 EID16
@@ -228,19 +202,18 @@ int mcp2515_set_can_id_std(uint8_t *buffer, uint16_t id, uint8_t data_length) {
   buffer[index + 1] = (uint8_t)id;  // TXBnSIDH
   id >>= 8;
   buffer[index] = (uint8_t)id;  // TXBnSIDL
-
   index += 2;
-  buffer[index++] = 0;  // TXBnEID8
-  buffer[index++] = 0;  // TXBnEID0
+
+  index += 2;  // TXBnEID8, TXBnEID0
 
   // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
   buffer[index++] = data_length & 0xf;  // TXBnDLC
 
-  return index;
+  return index + data_length;
 }
 
-void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
-                                          size_t buffer_length) {
+inline static void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
+                                                        size_t buffer_length) {
   // put the instruction and the address
   buffer[0] = MCP_WRITE;
   buffer[1] = TXB0SIDH;
@@ -249,13 +222,45 @@ void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
   platform_write_spi(internal_buf, 1);
 }
 
-void mcp2515_send_message(can_message_t *message) {
-  uint8_t local_buf[16];
-  int index =
-      mcp2515_set_can_id_std(local_buf, message->id, message->data_length);
-  memcpy(local_buf + index, message->data, message->data_length);
-  mcp2515_message_request_to_send_txb0(local_buf, index);
+void can_send_message(can_message_t *message) {
+  uint8_t *buffer = (uint8_t *)message + offsetof(can_message_t, data) - 7;
+  int size = mcp2515_set_can_id_std(message, buffer);
+  mcp2515_message_request_to_send_txb0(buffer, size);
   can_free_message(message);
+}
+
+static void mcp2515_parse_rx_message() {
+  can_message_t *message = can_create_message();
+  uint8_t *buffer = (uint8_t *)message + offsetof(can_message_t, data) - 7;
+  uint8_t *out_buffer = mcp2515_read(RXB0SIDH, buffer, 13);
+  uint16_t sid =
+      ((uint16_t)out_buffer[RXBnSIDH]) << 3 | out_buffer[RXBnSIDL] >> 5;
+  uint8_t is_extended = out_buffer[RXBnSIDL] & (1 << RXBnSIDL_IDE_BIT);
+  uint8_t data_length = out_buffer[RXBnDLC] & RXBnDLC_DLC_MASK;
+  uint8_t is_remote;
+  if (is_extended) {
+    uint32_t eid = out_buffer[RXBnSIDL] & 0x3;
+    eid <<= 8;
+    eid |= out_buffer[RXBnEID8];
+    eid <<= 8;
+    eid |= out_buffer[RXBnEID0];
+    eid |= sid << 18;
+    is_remote = out_buffer[RXBnDLC] & (1 << RXBnDLC_RTR_BIT);
+    message->id = eid;
+  } else {
+    is_remote = out_buffer[RXBnSIDL] & (1 << RXBnSIDL_SRR_BIT);
+    message->id = sid;
+  }
+  message->is_extended = is_extended;
+  message->is_remote = is_remote;
+  message->data_length = data_length;
+
+  can_consume_rx_message(message);
+}
+
+void mcp2515_handle_rx() {
+  mcp2515_bit_modify(CANINTF, (1 << CANINTF_RX0IF_BIT), 0);
+  mcp2515_parse_rx_message();
 }
 
 ///////////////////////////////////////////////
