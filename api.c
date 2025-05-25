@@ -19,13 +19,14 @@ can_message_t *can_create_message() {
   // may be overwritten but gives better performance and smaller memory
   // footprints.
   void *buffer = malloc(16);
-  message = (can_message_t *)(buffer + 8 - offsetof(can_message_t, data));
+  message = (can_message_t *)(buffer + 16 - sizeof(can_message_t));
 #endif
   return message;
 }
 
 void can_free_message(can_message_t *message) {
 #ifdef __message_create_by_malloc
-  void *buffer = message + offsetof(can_message_t, data) - 8;
+  void *buffer = message + sizeof(can_message_t) - 16;
+  free(buffer);
 #endif
 }

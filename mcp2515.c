@@ -1,14 +1,15 @@
 #include "can-controller/device/mcp2515.h"
 
-#include <alloca.h>
+// #include <alloca.h>
 #include <stddef.h>
-#include <stdio.h>
+// #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+// #include <unistd.h>
 
 #include "can-controller/api.h"
 #include "can-controller/can_message.h"
 
+static void platform_sleep_ms(uint32_t milliseconds);
 inline static void platform_write_spi(uint8_t *buffer, size_t length);
 static int platform_init_mcp2515_spi();
 static int platform_init_mcp2515_interrupt();
@@ -47,7 +48,7 @@ uint8_t can_init() {
 void mcp2515_reset() {
   uint8_t buf[1] = {MCP_RESET};
   platform_write_spi(buf, 1);
-  usleep(10000);  // Wait 10ms for reset
+  platform_sleep_ms(10);  // Wait 10ms for reset
 }
 
 void mcp2515_configure_1meg_bps() {
@@ -199,15 +200,16 @@ inline static int mcp2515_set_can_id_std(can_message_t *message,
   // TXBnSIDH: SID10  SID9  SID8  SID7  SID6  SID5  SID4  SID3
   // TXBnSIDL:  SID2  SID1  SID0   -   EXIDE   -   EID17 EID16
   id <<= 5;
-  buffer[index + 1] = (uint8_t)id;  // TXBnSIDH
+  buffer[index + 1] = (uint8_t)id;  // TXBnSIDL
   id >>= 8;
-  buffer[index] = (uint8_t)id;  // TXBnSIDL
+  buffer[index] = (uint8_t)id;  // TXBnSIDH
   index += 2;
 
   index += 2;  // TXBnEID8, TXBnEID0
 
+  //             7     6     5     4     3     2     1     0
   // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
-  buffer[index++] = data_length & 0xf;  // TXBnDLC
+  buffer[index++] = is_remote << 6 | data_length;  // TXBnDLC
 
   return index + data_length;
 }
@@ -223,7 +225,7 @@ inline static void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
 }
 
 void can_send_message(can_message_t *message) {
-  uint8_t *buffer = (uint8_t *)message + offsetof(can_message_t, data) - 7;
+  uint8_t *buffer = message->data - 7;
   int size = mcp2515_set_can_id_std(message, buffer);
   mcp2515_message_request_to_send_txb0(buffer, size);
   can_free_message(message);
@@ -231,7 +233,7 @@ void can_send_message(can_message_t *message) {
 
 static void mcp2515_parse_rx_message() {
   can_message_t *message = can_create_message();
-  uint8_t *buffer = (uint8_t *)message + offsetof(can_message_t, data) - 7;
+  uint8_t *buffer = message->data - 7;
   uint8_t *out_buffer = mcp2515_read(RXB0SIDH, buffer, 13);
   uint16_t sid =
       ((uint16_t)out_buffer[RXBnSIDH]) << 3 | out_buffer[RXBnSIDL] >> 5;
@@ -269,9 +271,13 @@ void mcp2515_handle_rx() {
 
 // Raspberry Pi
 //
-#if CONTROLLER_PLATFORM == raspberry_pi
+#ifdef CONTROLLER_PLATFORM_RASPBERRY_PI
 #include <wiringPi.h>
 #include <wiringPiSPI.h>
+
+void platform_sleep_ms(uint32_t milliseconds) {
+  usleep(milliseconds * 1000);
+}
 
 // SPI channel (0 for /dev/spidev0.0)
 #define SPI_CHANNEL 0
@@ -308,6 +314,58 @@ int platform_init_mcp2515_interrupt() {
 
 inline void platform_write_spi(uint8_t *buffer, size_t length) {
   wiringPiSPIDataRW(SPI_CHANNEL, buffer, length);
+}
+
+#endif  // CONTROLLER_PLATFORM == raspberry_pi
+
+#ifdef CONTROLLER_PLATFORM_PSOC4
+
+#include "project.h"
+
+#define _SPI_ SPIM_CAN
+
+#define SPI_SPEED 10000000  // 10MHz
+    
+void platform_sleep_ms(uint32_t milliseconds)
+{
+    CyDelay(milliseconds);
+}
+    
+int platform_init_mcp2515_spi() {
+  SPIM_CAN_Start();
+  return 0;
+}
+
+CY_ISR(ISR_RX0BF)
+{
+  mcp2515_handle_rx();
+}
+
+int platform_init_mcp2515_interrupt() {    
+  // Enable pin down interrupt. Connect the RX0BF (11) pin on the MCP2515 chip
+  // to the GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
+  isr_RX0BF_ClearPending();
+  isr_RX0BF_StartEx(ISR_RX0BF);
+  return 0;
+}
+
+inline void platform_write_spi(uint8_t *buffer, size_t length) {
+    while (SPIM_CAN_GetRxBufferSize()) {
+        SPIM_CAN_ReadRxData();
+    }
+    while(0u == (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_EMPTY)) {}
+
+    /* Put data elements into the TX FIFO and get data elements from the RX fifo */
+    size_t index_write = 0;
+    size_t index_read = 0;
+    while (index_read < length) {
+        if (index_write < length && (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_NOT_FULL)) {
+            CY_SET_REG8(SPIM_CAN_TXDATA_PTR, buffer[index_write++]);
+        }
+        if (SPIM_CAN_RX_STATUS_REG & SPIM_CAN_STS_RX_FIFO_NOT_EMPTY) {
+            buffer[index_read++] = CY_GET_REG8(SPIM_CAN_RXDATA_PTR);
+        }
+    }
 }
 
 #endif  // CONTROLLER_PLATFORM == raspberry_pi
