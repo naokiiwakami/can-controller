@@ -318,14 +318,10 @@ inline void platform_write_spi(uint8_t *buffer, size_t length) {
 
 #endif  // CONTROLLER_PLATFORM == raspberry_pi
 
-#ifdef CONTROLLER_PLATFORM_PSOC4
+#ifdef CONTROLLER_PLATFORM_PSOC
 
 #include "project.h"
 
-#define _SPI_ SPIM_CAN
-
-#define SPI_SPEED 10000000  // 10MHz
-    
 void platform_sleep_ms(uint32_t milliseconds)
 {
     CyDelay(milliseconds);
@@ -342,8 +338,9 @@ CY_ISR(ISR_RX0BF)
 }
 
 int platform_init_mcp2515_interrupt() {    
-  // Enable pin down interrupt. Connect the RX0BF (11) pin on the MCP2515 chip
-  // to the GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
+  // Enable interrupt to detect message received. Connect the RX0BF (11) pin
+  // on the MCP2515 chip to a pin on PSoC that is connected to an ISR module
+  // through an inverter. The name must be isr_RX0BF with type rising edge.
   isr_RX0BF_ClearPending();
   isr_RX0BF_StartEx(ISR_RX0BF);
   return 0;
