@@ -1,10 +1,7 @@
 #include "can-controller/device/mcp2515.h"
 
-// #include <alloca.h>
 #include <stddef.h>
-// #include <stdio.h>
 #include <string.h>
-// #include <unistd.h>
 
 #include "can-controller/api.h"
 #include "can-controller/can_message.h"
@@ -272,12 +269,12 @@ void mcp2515_handle_rx() {
 // Raspberry Pi
 //
 #ifdef CONTROLLER_PLATFORM_RASPBERRY_PI
+#include <stdio.h>
+#include <unistd.h>
 #include <wiringPi.h>
 #include <wiringPiSPI.h>
 
-void platform_sleep_ms(uint32_t milliseconds) {
-  usleep(milliseconds * 1000);
-}
+void platform_sleep_ms(uint32_t milliseconds) { usleep(milliseconds * 1000); }
 
 // SPI channel (0 for /dev/spidev0.0)
 #define SPI_CHANNEL 0
@@ -322,22 +319,16 @@ inline void platform_write_spi(uint8_t *buffer, size_t length) {
 
 #include "project.h"
 
-void platform_sleep_ms(uint32_t milliseconds)
-{
-    CyDelay(milliseconds);
-}
-    
+void platform_sleep_ms(uint32_t milliseconds) { CyDelay(milliseconds); }
+
 int platform_init_mcp2515_spi() {
   SPIM_CAN_Start();
   return 0;
 }
 
-CY_ISR(ISR_RX0BF)
-{
-  mcp2515_handle_rx();
-}
+CY_ISR(ISR_RX0BF) { mcp2515_handle_rx(); }
 
-int platform_init_mcp2515_interrupt() {    
+int platform_init_mcp2515_interrupt() {
   // Enable interrupt to detect message received. Connect the RX0BF (11) pin
   // on the MCP2515 chip to a pin on PSoC that is connected to an ISR module
   // through an inverter. The name must be isr_RX0BF with type rising edge.
@@ -347,22 +338,25 @@ int platform_init_mcp2515_interrupt() {
 }
 
 inline void platform_write_spi(uint8_t *buffer, size_t length) {
-    while (SPIM_CAN_GetRxBufferSize()) {
-        SPIM_CAN_ReadRxData();
-    }
-    while(0u == (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_EMPTY)) {}
+  while (SPIM_CAN_GetRxBufferSize()) {
+    SPIM_CAN_ReadRxData();
+  }
+  while (0u == (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_EMPTY)) {
+  }
 
-    /* Put data elements into the TX FIFO and get data elements from the RX fifo */
-    size_t index_write = 0;
-    size_t index_read = 0;
-    while (index_read < length) {
-        if (index_write < length && (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_NOT_FULL)) {
-            CY_SET_REG8(SPIM_CAN_TXDATA_PTR, buffer[index_write++]);
-        }
-        if (SPIM_CAN_RX_STATUS_REG & SPIM_CAN_STS_RX_FIFO_NOT_EMPTY) {
-            buffer[index_read++] = CY_GET_REG8(SPIM_CAN_RXDATA_PTR);
-        }
+  /* Put data elements into the TX FIFO and get data elements from the RX fifo
+   */
+  size_t index_write = 0;
+  size_t index_read = 0;
+  while (index_read < length) {
+    if (index_write < length &&
+        (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_NOT_FULL)) {
+      CY_SET_REG8(SPIM_CAN_TXDATA_PTR, buffer[index_write++]);
     }
+    if (SPIM_CAN_RX_STATUS_REG & SPIM_CAN_STS_RX_FIFO_NOT_EMPTY) {
+      buffer[index_read++] = CY_GET_REG8(SPIM_CAN_RXDATA_PTR);
+    }
+  }
 }
 
 #endif  // CONTROLLER_PLATFORM == raspberry_pi

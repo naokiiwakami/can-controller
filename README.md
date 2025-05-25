@@ -7,8 +7,8 @@ Coverages of support are currently:
 
 | controllers  | mcp2515 |
 | ------------ | ------- |
-| PSoC 4       | TBD     |
-| Raspberry Pi | v       |
+| PSoC         | yes     |
+| Raspberry Pi | yes     |
 
 ## Getting Started
 TBD

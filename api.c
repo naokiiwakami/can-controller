@@ -1,6 +1,7 @@
 #include "can-controller/api.h"
 
-#if CONTROLLER_PLATFORM == raspberry_pi
+#if defined(CONTROLLER_PLATFORM_RASPBERRY_PI) || \
+    defined(CONTROLLER_PLATFORM_PSOC)
 #define __message_create_by_malloc
 #endif
 
