@@ -1,2 +1,5 @@
 # Object file
 *.o
+
+# KiCAD backups
+*-backups
