@@ -38,7 +38,6 @@ In the application code, call API method `can_init()` at the beginning of the pr
 
 ```c
 #include "can-controller/api.h"
-#include "can-controller/device/mcp2515.h"
 
 int main() {
   if (can_init()) {
