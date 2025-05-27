@@ -42,6 +42,10 @@ extern void can_send_message(can_message_t *message);
  */
 extern void can_consume_rx_message(can_message_t *message);
 
+#ifdef SUPPORT_CALLBACK_INJECTION
+extern void can_set_rx_message_consumer(void (*callback)(can_message_t *));
+#endif
+
 #ifdef __cplusplus
 }
 #endif

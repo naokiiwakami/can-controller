@@ -31,3 +31,17 @@ void can_free_message(can_message_t *message) {
   free(buffer);
 #endif
 }
+
+#ifdef SUPPORT_CALLBACK_INJECTION
+static void (*consume_rx_message)(can_message_t *) = NULL;
+
+void can_consume_rx_message(can_message_t *message) {
+  if (consume_rx_message != NULL) {
+    consume_rx_message(message);
+  }
+}
+
+void can_set_rx_message_consumer(void (*callback)(can_message_t *)) {
+  consume_rx_message = callback;
+}
+#endif
