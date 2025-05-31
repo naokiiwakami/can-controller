@@ -200,9 +200,42 @@ inline static int mcp2515_set_can_id_std(can_message_t *message,
   buffer[index + 1] = (uint8_t)id;  // TXBnSIDL
   id >>= 8;
   buffer[index] = (uint8_t)id;  // TXBnSIDH
-  index += 2;
 
-  index += 2;  // TXBnEID8, TXBnEID0
+  index += 4;  // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
+
+  //             7     6     5     4     3     2     1     0
+  // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
+  buffer[index++] = is_remote << 6 | data_length;  // TXBnDLC
+
+  return index + data_length;
+}
+
+inline static int mcp2515_set_can_id_ext(can_message_t *message,
+                                         uint8_t *buffer) {
+  uint32_t id = message->id;
+  uint32_t is_remote = message->is_remote;
+  uint8_t data_length = message->data_length;
+
+  int index = 2;  // skips SPI request and the register address
+
+  // SPI data part
+  //
+  //               7     6     5     4     3     2     1     0
+  // TXBnSIDH: SID10  SID9  SID8  SID7  SID6  SID5  SID4  SID3
+  // TXBnSIDL:  SID2  SID1  SID0   -   EXIDE   -   EID17 EID16
+  // TXBnEID8: EID15 EID14 EID13 EID12 EID11 EID10  EID9  EID8
+  // TXBnEID0:  EID7  EID6  EID5  EID4  EID3  EID2  EID1  EID0
+  buffer[index + 3] = (uint8_t)id;  // TXBnEID0
+  id >>= 8;
+  buffer[index + 2] = (uint8_t)id;  // TXBnEID8
+  id >>= 8;
+  buffer[index + 1] = ((uint8_t)id & 0x3) | 0x8;  // TXBnSIDL
+  id <<= 3;
+  buffer[index + 1] |= (uint8_t)id & 0xe0;  // TXBnSIDL
+  id >>= 8;
+  buffer[index] = (uint8_t)id;  // TXBnSIDH
+
+  index += 4;  // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
 
   //             7     6     5     4     3     2     1     0
   // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
@@ -223,7 +256,12 @@ inline static void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
 
 void can_send_message(can_message_t *message) {
   uint8_t *buffer = message->data - 7;
-  int size = mcp2515_set_can_id_std(message, buffer);
+  int size;
+  if (message->is_extended) {
+    size = mcp2515_set_can_id_ext(message, buffer);
+  } else {
+    size = mcp2515_set_can_id_std(message, buffer);
+  }
   mcp2515_message_request_to_send_txb0(buffer, size);
   can_free_message(message);
 }
