@@ -5,6 +5,11 @@
 
 #include "can-controller/api.h"
 #include "can-controller/can_message.h"
+#include "can-controller/internal.h"
+
+#ifdef CONTROLLER_PLATFORM_PSOC
+#include "project.h"
+#endif
 
 static void platform_sleep_ms(uint32_t milliseconds);
 inline static void platform_write_spi(uint8_t *buffer, size_t length);
@@ -18,6 +23,7 @@ static void mcp2515_configure_RXnBF_pins();
 static void mcp2515_handle_rx();
 
 uint8_t can_init() {
+  initialize_api();
   if (platform_init_mcp2515_spi()) {
     return 1;
   }
@@ -355,8 +361,6 @@ inline void platform_write_spi(uint8_t *buffer, size_t length) {
 
 #ifdef CONTROLLER_PLATFORM_PSOC
 
-#include "project.h"
-
 void platform_sleep_ms(uint32_t milliseconds) { CyDelay(milliseconds); }
 
 int platform_init_mcp2515_spi() {
@@ -364,7 +368,9 @@ int platform_init_mcp2515_spi() {
   return 0;
 }
 
-CY_ISR(ISR_RX0BF) { mcp2515_handle_rx(); }
+CY_ISR(ISR_RX0BF) {
+    mcp2515_handle_rx();
+}
 
 int platform_init_mcp2515_interrupt() {
   // Enable interrupt to detect message received. Connect the RX0BF (11) pin
