@@ -8,6 +8,10 @@
 #include "can-controller/internal.h"
 #include "can-controller/lib.h"
 
+static void mcp2515_reset();
+static void mcp2515_write_register(uint8_t address, uint8_t value);
+static void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data);
+
 static void mcp2515_configure_1meg_bps();
 static void mcp2515_configure_receive_buffer_0();
 static void mcp2515_configure_receive_buffer_1();

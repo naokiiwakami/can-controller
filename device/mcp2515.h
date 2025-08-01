@@ -201,20 +201,3 @@
 #define OP_MODE_LISTEN_ONLY (0b011 << 5)
 #define OP_MODE_CONFIGURATION (0b100 << 5)
 #define OP_MODE_MASK 0xe0
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-// MCP2515 admin methods
-extern void mcp2515_reset();
-extern void mcp2515_send_message(can_message_t *message);
-
-// low-level data access methods to MCP2515 registers
-// buffer size must be length + 2
-extern uint8_t *mcp2515_read(uint8_t address, uint8_t *buffer, size_t length);
-extern void mcp2515_write_register(uint8_t address, uint8_t value);
-extern uint8_t mcp2515_read_register(uint8_t address);
-extern void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data);
-#ifdef __cplusplus
-}
-#endif
