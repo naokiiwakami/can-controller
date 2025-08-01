@@ -6,25 +6,16 @@
 #include "can-controller/api.h"
 #include "can-controller/can_message.h"
 #include "can-controller/internal.h"
-
-#ifdef CONTROLLER_PLATFORM_PSOC
-#include "project.h"
-#endif
-
-static void platform_sleep_ms(uint32_t milliseconds);
-inline static void platform_write_spi(uint8_t *buffer, size_t length);
-static int platform_init_mcp2515_spi();
-static int platform_init_mcp2515_interrupt();
+#include "can-controller/lib.h"
 
 static void mcp2515_configure_1meg_bps();
 static void mcp2515_configure_receive_buffer_0();
 static void mcp2515_configure_receive_buffer_1();
 static void mcp2515_configure_RXnBF_pins();
-static void mcp2515_handle_rx();
 
 uint8_t can_init() {
   initialize_api();
-  if (platform_init_mcp2515_spi()) {
+  if (platform_init_spi()) {
     return 1;
   }
 
@@ -38,7 +29,7 @@ uint8_t can_init() {
   mcp2515_configure_RXnBF_pins();
 
   // The interrupts are triggered by the RX0BF (11) pin on the MCP2515 chip.
-  if (platform_init_mcp2515_interrupt()) {
+  if (platform_init_rx_interrupt()) {
     return 1;
   }
 
@@ -49,7 +40,7 @@ uint8_t can_init() {
 }
 
 void mcp2515_reset() {
-  uint8_t buf[1] = {MCP_RESET};
+  uint8_t buf[1] = {MCP2515_RESET};
   platform_write_spi(buf, 1);
   platform_sleep_ms(10);  // Wait 10ms for reset
 }
@@ -168,24 +159,24 @@ void mcp2515_configure_RXnBF_pins() {
 }
 
 uint8_t *mcp2515_read(uint8_t address, uint8_t *buffer, size_t length) {
-  buffer[0] = MCP_READ;
+  buffer[0] = MCP2515_READ;
   buffer[1] = address;
   platform_write_spi(buffer, length + 2);
   return buffer + 2;
 }
 
 void mcp2515_write_register(uint8_t address, uint8_t value) {
-  uint8_t buf[3] = {MCP_WRITE, address, value};
+  uint8_t buf[3] = {MCP2515_WRITE, address, value};
   platform_write_spi(buf, 3);
 }
 
 uint8_t mcp2515_read_register(uint8_t address) {
-  uint8_t buf[3] = {MCP_READ, address, 0x00};
+  uint8_t buf[3] = {MCP2515_READ, address, 0x00};
   return mcp2515_read(address, buf, 1)[0];
 }
 
 void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data) {
-  uint8_t buf[4] = {MCP_BIT_MODIFY, address, mask, data};
+  uint8_t buf[4] = {MCP2515_BIT_MODIFY, address, mask, data};
   platform_write_spi(buf, 4);
 }
 
@@ -253,10 +244,10 @@ inline static int mcp2515_set_can_id_ext(can_message_t *message,
 inline static void mcp2515_message_request_to_send_txb0(uint8_t *buffer,
                                                         size_t buffer_length) {
   // put the instruction and the address
-  buffer[0] = MCP_WRITE;
+  buffer[0] = MCP2515_WRITE;
   buffer[1] = TXB0SIDH;
   platform_write_spi(buffer, buffer_length);
-  uint8_t internal_buf[1] = {MCP_RTS_TXB0};
+  uint8_t internal_buf[1] = {MCP2515_RTS_TXB0};
   platform_write_spi(internal_buf, 1);
 }
 
@@ -301,106 +292,7 @@ static void mcp2515_parse_rx_message() {
   can_consume_rx_message(message);
 }
 
-void mcp2515_handle_rx() {
+void handle_rx() {
   mcp2515_bit_modify(CANINTF, (1 << CANINTF_RX0IF_BIT), 0);
   mcp2515_parse_rx_message();
 }
-
-///////////////////////////////////////////////
-// Platform Specific Implementations
-///////////////////////////////////////////////
-
-// Raspberry Pi
-//
-#ifdef CONTROLLER_PLATFORM_RASPBERRY_PI
-#include <stdio.h>
-#include <unistd.h>
-#include <wiringPi.h>
-#include <wiringPiSPI.h>
-
-void platform_sleep_ms(uint32_t milliseconds) { usleep(milliseconds * 1000); }
-
-// SPI channel (0 for /dev/spidev0.0)
-#define SPI_CHANNEL 0
-
-#define SPI_SPEED 10000000  // 10MHz
-
-// Use GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
-// See
-// https://github.com/WiringPi/WiringPi/blob/master/documentation/english/functions.md
-// for Wiring Pi pin number configuration.
-#define INTERRUPT_PIN 31
-
-int platform_init_mcp2515_spi() {
-  if (wiringPiSetup() == -1) {
-    fprintf(stderr, "WiringPi setup failed\n");
-    return 1;
-  }
-  if (wiringPiSPISetup(SPI_CHANNEL, SPI_SPEED) == -1) {
-    fprintf(stderr, "SPI setup failed\n");
-    return 1;
-  }
-  return 0;
-}
-
-int platform_init_mcp2515_interrupt() {
-  // Enable pin down interrupt. Connect the RX0BF (11) pin on the MCP2515 chip
-  // to the GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
-  if (wiringPiISR(INTERRUPT_PIN, INT_EDGE_FALLING, mcp2515_handle_rx)) {
-    fprintf(stderr, "ISR setup failed\n");
-    return 1;
-  }
-  return 0;
-}
-
-inline void platform_write_spi(uint8_t *buffer, size_t length) {
-  wiringPiSPIDataRW(SPI_CHANNEL, buffer, length);
-}
-
-#endif  // CONTROLLER_PLATFORM == raspberry_pi
-
-#ifdef CONTROLLER_PLATFORM_PSOC
-
-void platform_sleep_ms(uint32_t milliseconds) { CyDelay(milliseconds); }
-
-int platform_init_mcp2515_spi() {
-  SPIM_CAN_Start();
-  return 0;
-}
-
-CY_ISR(ISR_RX0BF) {
-    mcp2515_handle_rx();
-}
-
-int platform_init_mcp2515_interrupt() {
-  // Enable interrupt to detect message received. Connect the RX0BF (11) pin
-  // on the MCP2515 chip to a pin on PSoC that is connected to an ISR module
-  // through an inverter. The name must be isr_RX0BF with type rising edge.
-  isr_RX0BF_ClearPending();
-  isr_RX0BF_StartEx(ISR_RX0BF);
-  return 0;
-}
-
-inline void platform_write_spi(uint8_t *buffer, size_t length) {
-  while (SPIM_CAN_GetRxBufferSize()) {
-    SPIM_CAN_ReadRxData();
-  }
-  while (0u == (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_EMPTY)) {
-  }
-
-  /* Put data elements into the TX FIFO and get data elements from the RX fifo
-   */
-  size_t index_write = 0;
-  size_t index_read = 0;
-  while (index_read < length) {
-    if (index_write < length &&
-        (SPIM_CAN_TX_STATUS_REG & SPIM_CAN_STS_TX_FIFO_NOT_FULL)) {
-      CY_SET_REG8(SPIM_CAN_TXDATA_PTR, buffer[index_write++]);
-    }
-    if (SPIM_CAN_RX_STATUS_REG & SPIM_CAN_STS_RX_FIFO_NOT_EMPTY) {
-      buffer[index_read++] = CY_GET_REG8(SPIM_CAN_RXDATA_PTR);
-    }
-  }
-}
-
-#endif  // CONTROLLER_PLATFORM == raspberry_pi

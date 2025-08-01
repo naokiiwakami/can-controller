@@ -4,6 +4,7 @@ project(can_controller C)
 # Source files
 set(SOURCES
     api.c
+    lib.c
     mcp2515.c
 )
 

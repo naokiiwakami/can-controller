@@ -14,12 +14,18 @@
 extern "C" {
 #endif
 
+// Each device must have implementations of following methods
+
 /**
  * Initializes the can controller.
  *
  * @returns 0 on successful initialization. 1 on error.
  */
 extern uint8_t can_init();
+
+extern void handle_rx();
+////////////////////////////////////////////////////////////////
+
 
 extern can_message_t *can_create_message();
 extern void can_free_message(can_message_t *message);
