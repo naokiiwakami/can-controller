@@ -13,13 +13,9 @@ static void mcp2515_configure_receive_buffer_0();
 static void mcp2515_configure_receive_buffer_1();
 static void mcp2515_configure_RXnBF_pins();
 
-uint8_t can_init() {
-  initialize_api();
-  if (platform_init_spi()) {
-    return 1;
-  }
-
+uint8_t device_init() {
   mcp2515_reset();
+
   // Set MCP2515 to Configuration mode
   mcp2515_write_register(CANCTRL, 0x87);
 
@@ -28,14 +24,12 @@ uint8_t can_init() {
   mcp2515_configure_receive_buffer_1();
   mcp2515_configure_RXnBF_pins();
 
-  // The interrupts are triggered by the RX0BF (11) pin on the MCP2515 chip.
-  if (platform_init_rx_interrupt()) {
-    return 1;
-  }
+  return 0;
+}
 
-  // set to normal mode
+uint8_t device_start_can() {
+ // set to normal mode
   mcp2515_bit_modify(CANCTRL, OP_MODE_MASK, OP_MODE_NORMAL);
-
   return 0;
 }
 

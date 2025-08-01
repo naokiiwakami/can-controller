@@ -15,6 +15,10 @@ extern "C" {
 #endif
 
 // Each device must have implementations of following methods
+extern void handle_rx();
+extern uint8_t device_init();
+extern uint8_t device_start_can();
+////////////////////////////////////////////////////////////////
 
 /**
  * Initializes the can controller.
@@ -23,8 +27,6 @@ extern "C" {
  */
 extern uint8_t can_init();
 
-extern void handle_rx();
-////////////////////////////////////////////////////////////////
 
 
 extern can_message_t *can_create_message();

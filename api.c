@@ -16,6 +16,7 @@
 #endif  // __message_create_by_malloc
 
 #include "can-controller/internal.h"
+#include "can-controller/lib.h"
 
 #ifdef __message_create_by_mempool
 #define MAX_NUM_MESSAGES 32
@@ -49,6 +50,24 @@ void initialize_api()
 #ifdef __message_create_by_mempool
   init_message_pool();
 #endif
+}
+
+uint8_t can_init() {
+  initialize_api();
+  if (platform_init_spi()) {
+    return 1;
+  }
+
+  if (device_init()) {
+    return 1;
+  }
+
+  // The interrupts are triggered by the RX0BF (11) pin on the MCP2515 chip.
+  if (platform_init_rx_interrupt()) {
+    return 1;
+  }
+
+  return device_start_can();
 }
 
 can_message_t *can_create_message() {

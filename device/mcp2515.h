@@ -206,7 +206,6 @@
 extern "C" {
 #endif
 // MCP2515 admin methods
-extern uint8_t mcp2515_init();
 extern void mcp2515_reset();
 extern void mcp2515_send_message(can_message_t *message);
 
