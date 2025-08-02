@@ -5,7 +5,7 @@ project(can_controller C)
 set(SOURCES
     api.c
     lib.c
-    mcp2515.c
+    mcp2518.c
 )
 
 # Platform selection via CMake variable
