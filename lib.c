@@ -20,7 +20,11 @@ void platform_sleep_ms(uint32_t milliseconds) { usleep(milliseconds * 1000); }
 // SPI channel (0 for /dev/spidev0.0)
 #define SPI_CHANNEL 0
 
+#if defined(MCP2518FD) || defined(MCP2517FD)
+#define SPI_SPEED 20000000 // 20MHz
+#else
 #define SPI_SPEED 10000000 // 10MHz
+#endif
 
 // Use GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
 // See

@@ -2,10 +2,17 @@
 #include <string.h>
 
 #include "can-controller/api.h"
-#include "can-controller/device/mcp2518.h"
-#include "can-controller/device/mcp2518_defines.h"
-#include "can-controller/device/mcp2518_register.h"
+#include "can-controller/device/mcp25xxfd_defines.h"
+#include "can-controller/device/mcp25xxfd_register.h"
 #include "can-controller/lib.h"
+
+// MCP25xxFD SPI Instructions ///////////////////////////////
+#define MCP25xxFD_RESET 0x00      // C = 0b0000; A = 0x000
+#define MCP25xxFD_READ 0x30       // C = 0b0011; A; D = SDO
+#define MCP25xxFD_WRITE 0x20      // C = 0b0010; A; D = SDI
+#define MCP25xxFD_READ_CRC 0xb0   // C = 0b1011; A; N; D = SDO; CRC = SDO
+#define MCP25xxFD_WRITE_CRC 0xa0  // C = 0b1010; A; N; D = SDI; CRC = SDI
+#define MCP25xxFD_WRITE_SAFE 0xc0 // C = 0b1100; A; D = SDI; CRC = SDI
 
 // Private method declarations /////////////////////////////
 union SpiRegister {
@@ -43,63 +50,63 @@ union SpiRxMessage {
   uint8_t buffer[PAYLOAD_SIZE + 10];
 };
 
-static void mcp2518_read_register(uint16_t address, union SpiRegister *info,
-                                  size_t length);
-static void mcp2518_write_register(uint16_t address, union SpiRegister *info,
-                                   size_t length);
+static void mcp25xxfd_read_register(uint16_t address, union SpiRegister *info,
+                                    size_t length);
+static void mcp25xxfd_write_register(uint16_t address, union SpiRegister *info,
+                                     size_t length);
 
 static union SpiTxMessage *make_tx_message(can_message_t *message);
 static union SpiRxMessage *make_rx_message(can_message_t *message);
 
-static void mcp2518_reset();
-static uint8_t mcp2518_config_osc();
-static uint8_t mcp2518_config_io();
-static uint8_t mcp2518_config_bit_time();
-static uint8_t mcp2518_config_interrupt();
-static uint8_t mcp2518_config_can_control();
-static uint8_t mcp2518_config_txfifo();
-static uint8_t mcp2518_config_rxfifo();
-static uint8_t mcp2518_config_filter();
-static uint8_t mcp2518_change_mode(uint8_t mode);
+static void mcp25xxfd_reset();
+static uint8_t mcp25xxfd_config_osc();
+static uint8_t mcp25xxfd_config_io();
+static uint8_t mcp25xxfd_config_bit_time();
+static uint8_t mcp25xxfd_config_interrupt();
+static uint8_t mcp25xxfd_config_can_control();
+static uint8_t mcp25xxfd_config_txfifo();
+static uint8_t mcp25xxfd_config_rxfifo();
+static uint8_t mcp25xxfd_config_filter();
+static uint8_t mcp25xxfd_change_mode(uint8_t mode);
 
-static can_message_t *mcp2518_get_rx_message();
+static can_message_t *mcp25xxfd_get_rx_message();
 
 ////////////////////////////////////////////////////////////
 
 uint8_t device_init() {
-  mcp2518_reset();
-  if (mcp2518_config_osc()) {
+  mcp25xxfd_reset();
+  if (mcp25xxfd_config_osc()) {
     return 1;
   }
-  if (mcp2518_config_io()) {
+  if (mcp25xxfd_config_io()) {
     return 1;
   }
-  if (mcp2518_config_bit_time()) {
+  if (mcp25xxfd_config_bit_time()) {
     return 1;
   }
-  if (mcp2518_config_interrupt()) {
+  if (mcp25xxfd_config_interrupt()) {
     return 1;
   }
-  if (mcp2518_config_can_control()) {
+  if (mcp25xxfd_config_can_control()) {
     return 1;
   }
-  if (mcp2518_config_txfifo()) {
+  if (mcp25xxfd_config_txfifo()) {
     return 1;
   }
-  if (mcp2518_config_rxfifo()) {
+  if (mcp25xxfd_config_rxfifo()) {
     return 1;
   }
-  if (mcp2518_config_filter()) {
+  if (mcp25xxfd_config_filter()) {
     return 1;
   }
-  return mcp2518_change_mode(CAN_CLASSIC_MODE);
+  return mcp25xxfd_change_mode(CAN_CLASSIC_MODE);
 }
 
 uint8_t device_start_can() { return 0; }
 
 void handle_rx() {
   for (;;) {
-    can_message_t *message = mcp2518_get_rx_message();
+    can_message_t *message = mcp25xxfd_get_rx_message();
     if (message == NULL) {
       break;
     }
@@ -115,17 +122,17 @@ void can_send_message(can_message_t *message) {
 
   union SpiRegister reg;
   uint16_t register_address = cREGADDR_CiFIFOUA + channel * CiFIFO_OFFSET;
-  mcp2518_read_register(register_address, &reg, 2);
+  mcp25xxfd_read_register(register_address, &reg, 2);
   uint16_t fifo_address = reg.data.body.word + cRAMADDR_START;
   size_t bytes_to_send = 10 + (dlc + 3) / 4 * 4;
-  tx->data.header[0] = MCP2518_WRITE | (fifo_address >> 8);
+  tx->data.header[0] = MCP25xxFD_WRITE | (fifo_address >> 8);
   tx->data.header[1] = fifo_address & 0xff;
   platform_write_spi(tx->buffer, bytes_to_send);
 
   // flush
   register_address = cREGADDR_CiFIFOCON + (channel * CiFIFO_OFFSET) + 1;
   reg.data.body.byte[0] = 0x3; // UINC + TXREQ
-  mcp2518_write_register(register_address, &reg, 1);
+  mcp25xxfd_write_register(register_address, &reg, 1);
 
   can_free_message(message);
 }
@@ -156,36 +163,36 @@ union SpiRxMessage *make_rx_message(can_message_t *message) {
   return rx;
 }
 
-// MCP2518 SPI operations ///////////////////////////////////////////
-void mcp2518_read_register(uint16_t address, union SpiRegister *info,
-                           size_t length) {
-  info->data.header[0] = MCP2518_READ | (address >> 8);
+// MCP25xxFD SPI operations ///////////////////////////////////////////
+void mcp25xxfd_read_register(uint16_t address, union SpiRegister *info,
+                             size_t length) {
+  info->data.header[0] = MCP25xxFD_READ | (address >> 8);
   info->data.header[1] = address & 0xff;
   platform_write_spi(info->buffer, length + 2);
 }
 
-void mcp2518_write_register(uint16_t address, union SpiRegister *info,
-                            size_t length) {
-  info->data.header[0] = MCP2518_WRITE | (address >> 8);
+void mcp25xxfd_write_register(uint16_t address, union SpiRegister *info,
+                              size_t length) {
+  info->data.header[0] = MCP25xxFD_WRITE | (address >> 8);
   info->data.header[1] = address & 0xff;
   platform_write_spi(info->buffer, length + 2);
 }
 
-void mcp2518_reset() {
-  uint8_t buf[2] = {MCP2518_RESET, 0};
+void mcp25xxfd_reset() {
+  uint8_t buf[2] = {MCP25xxFD_RESET, 0};
   platform_write_spi(buf, 2);
   platform_sleep_ms(10);
 }
 
-// MCP2518 methods //////////////////////////////////////////////////
+// MCP25xxFD methods //////////////////////////////////////////////////
 
-uint8_t mcp2518_config_osc() {
+uint8_t mcp25xxfd_config_osc() {
   union SpiRegister info = {0};
   // Set OSC
   info.data.body.byte[0] = 0x0; // no PLL, no LP, no clock divisers
-  mcp2518_write_register(cREGADDR_OSC, &info, 1);
+  mcp25xxfd_write_register(cREGADDR_OSC, &info, 1);
   // check OSC status
-  mcp2518_read_register(cREGADDR_OSC, &info, 2);
+  mcp25xxfd_read_register(cREGADDR_OSC, &info, 2);
   if ((info.data.body.byte[1] & 0x4) == 0) {
     fprintf(stderr, "Clock is not ready\n");
     return 1;
@@ -201,13 +208,13 @@ uint8_t mcp2518_config_osc() {
   return 0;
 }
 
-uint8_t mcp2518_config_io() {
+uint8_t mcp25xxfd_config_io() {
   union SpiRegister info = {0};
-  mcp2518_read_register(cREGADDR_IOCON + 3, &info, 1);
+  mcp25xxfd_read_register(cREGADDR_IOCON + 3, &info, 1);
   info.data.body.byte[0] &=
       0xfc; // PM1 (rx) and PM0 (tx) are used for interrupt pints
-  mcp2518_write_register(cREGADDR_IOCON + 3, &info, 1);
-  mcp2518_read_register(cREGADDR_IOCON, &info, 4);
+  mcp25xxfd_write_register(cREGADDR_IOCON + 3, &info, 1);
+  mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
   if (info.data.body.byte[3] != 0) {
     fprintf(stderr, "Failed to set up interrupt pings: %02x\n",
             info.data.body.byte[3]);
@@ -216,7 +223,7 @@ uint8_t mcp2518_config_io() {
   return 0;
 }
 
-uint8_t mcp2518_config_bit_time() {
+uint8_t mcp25xxfd_config_bit_time() {
   union SpiRegister info = {0};
   // Bit timing for NBR 1Mbps, DBR 4Mbps, Fsys=20MHz
   REG_CiNBTCFG nbt_config = {0};
@@ -225,7 +232,7 @@ uint8_t mcp2518_config_bit_time() {
   nbt_config.bF.TSEG2 = 3;
   nbt_config.bF.SJW = 3;
   info.data.body.word = nbt_config.word;
-  mcp2518_write_register(cREGADDR_CiNBTCFG, &info, 4);
+  mcp25xxfd_write_register(cREGADDR_CiNBTCFG, &info, 4);
 
   REG_CiDBTCFG dbt_config = {0};
   REG_CiTDC tdc_config = {0};
@@ -238,26 +245,26 @@ uint8_t mcp2518_config_bit_time() {
   tdc_config.bF.TDCValue = 0;
 
   info.data.body.word = dbt_config.word;
-  mcp2518_write_register(cREGADDR_CiDBTCFG, &info, 4);
+  mcp25xxfd_write_register(cREGADDR_CiDBTCFG, &info, 4);
 
   info.data.body.word = tdc_config.word;
-  mcp2518_write_register(cREGADDR_CiTDC, &info, 4);
+  mcp25xxfd_write_register(cREGADDR_CiTDC, &info, 4);
 
   return 0;
 }
 
-uint8_t mcp2518_config_interrupt() {
+uint8_t mcp25xxfd_config_interrupt() {
   // enable receive FIFO interrupt
   REG_CiINTENABLE enables;
   enables.word = 0;
   enables.IE.RXIE = 1;
   union SpiRegister info = {0};
   info.data.body.word = enables.word;
-  mcp2518_write_register(cREGADDR_CiINTENABLE, &info, 1);
+  mcp25xxfd_write_register(cREGADDR_CiINTENABLE, &info, 1);
   return 0;
 }
 
-uint8_t mcp2518_config_can_control() {
+uint8_t mcp25xxfd_config_can_control() {
   REG_CiCON can_ctl;
   can_ctl.word = canControlResetValues[cREGADDR_CiCON / 4];
   can_ctl.bF.TxBandWidthSharing = CAN_TXBWS_NO_DELAY;
@@ -269,11 +276,11 @@ uint8_t mcp2518_config_can_control() {
 
   union SpiRegister info = {0};
   info.data.body.word = can_ctl.word;
-  mcp2518_write_register(cREGADDR_CiCON + 2, &info, 1);
+  mcp25xxfd_write_register(cREGADDR_CiCON + 2, &info, 1);
   return 0;
 }
 
-uint8_t mcp2518_config_txfifo() {
+uint8_t mcp25xxfd_config_txfifo() {
   // Use FIFO1 for TX
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
@@ -290,11 +297,11 @@ uint8_t mcp2518_config_txfifo() {
   info.data.body.word = fifo_con.word;
 
   uint16_t address = cREGADDR_CiFIFOCON + channel * CiFIFO_OFFSET;
-  mcp2518_write_register(address, &info, 4);
+  mcp25xxfd_write_register(address, &info, 4);
   return 0;
 }
 
-uint8_t mcp2518_config_rxfifo() {
+uint8_t mcp25xxfd_config_rxfifo() {
   // Use FIFO2 for RX
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH2;
 
@@ -307,30 +314,30 @@ uint8_t mcp2518_config_rxfifo() {
   union SpiRegister info = {0};
   info.data.body.word = fifo_con.word;
   uint16_t address = cREGADDR_CiFIFOCON + channel * CiFIFO_OFFSET;
-  mcp2518_write_register(address, &info, 4);
+  mcp25xxfd_write_register(address, &info, 4);
 
   info.data.body.word = 0;
-  mcp2518_read_register(cREGADDR_CiINTENABLE, &info, 2);
+  mcp25xxfd_read_register(cREGADDR_CiINTENABLE, &info, 2);
   info.data.body.word |= CAN_RX_EVENT;
-  mcp2518_write_register(cREGADDR_CiINTENABLE, &info, 2);
+  mcp25xxfd_write_register(cREGADDR_CiINTENABLE, &info, 2);
   return 0;
 }
 
-static uint8_t mcp2518_disable_filter(CAN_FILTER filter) {
+static uint8_t mcp25xxfd_disable_filter(CAN_FILTER filter) {
   union SpiRegister info = {0};
   uint16_t address = cREGADDR_CiFLTCON + filter;
-  mcp2518_read_register(address, &info, 1);
+  mcp25xxfd_read_register(address, &info, 1);
   REG_CiFLTCON_BYTE filter_ctl;
   filter_ctl.byte = info.data.body.byte[0];
   filter_ctl.bF.Enable = 0;
   info.data.body.byte[0] = filter_ctl.byte;
-  mcp2518_write_register(address, &info, 1);
+  mcp25xxfd_write_register(address, &info, 1);
   return 0;
 }
 
-static uint8_t mcp2518_link_filter_to_fifo(CAN_FILTER filter,
-                                           CAN_FIFO_CHANNEL channel,
-                                           uint8_t enable) {
+static uint8_t mcp25xxfd_link_filter_to_fifo(CAN_FILTER filter,
+                                             CAN_FIFO_CHANNEL channel,
+                                             uint8_t enable) {
   REG_CiFLTCON_BYTE filter_ctl;
   filter_ctl.byte = 0;
   filter_ctl.bF.Enable = enable ? 1 : 0;
@@ -338,44 +345,44 @@ static uint8_t mcp2518_link_filter_to_fifo(CAN_FILTER filter,
   uint16_t address = cREGADDR_CiFLTCON + filter;
   union SpiRegister info = {0};
   info.data.body.byte[0] = filter_ctl.byte;
-  mcp2518_write_register(address, &info, 1);
+  mcp25xxfd_write_register(address, &info, 1);
 
   return 0;
 }
 
-uint8_t mcp2518_config_filter() {
+uint8_t mcp25xxfd_config_filter() {
   uint16_t address;
   // disable filter 0
-  mcp2518_disable_filter(CAN_FILTER0);
+  mcp25xxfd_disable_filter(CAN_FILTER0);
 
   // Configure filter 0 object and mask to match all
   CAN_FILTER filter = CAN_FILTER0;
   union SpiRegister info = {0};
   info.data.body.word = 0;
   address = cREGADDR_CiFLTOBJ + (filter * CiFILTER_OFFSET);
-  mcp2518_write_register(address, &info, 4);
+  mcp25xxfd_write_register(address, &info, 4);
   info.data.body.word = 0;
   address = cREGADDR_CiMASK + (filter * CiFILTER_OFFSET);
-  mcp2518_write_register(address, &info, 4);
+  mcp25xxfd_write_register(address, &info, 4);
 
   // link filter to the RX fifo, then enable the filter
-  mcp2518_link_filter_to_fifo(CAN_FILTER0, CAN_FIFO_CH2, 1);
+  mcp25xxfd_link_filter_to_fifo(CAN_FILTER0, CAN_FIFO_CH2, 1);
 
   return 0;
 }
 
-uint8_t mcp2518_change_mode(uint8_t mode) {
+uint8_t mcp25xxfd_change_mode(uint8_t mode) {
   // Set REQOP
   union SpiRegister info = {0};
-  mcp2518_read_register(cREGADDR_CiCON + 3, &info, 1);
+  mcp25xxfd_read_register(cREGADDR_CiCON + 3, &info, 1);
   info.data.body.byte[0] &= 0xf8;
   info.data.body.byte[0] |= mode & 0x7;
-  mcp2518_write_register(cREGADDR_CiCON + 3, &info, 1);
+  mcp25xxfd_write_register(cREGADDR_CiCON + 3, &info, 1);
 
   // Verify OPMOD
   uint8_t current;
   for (int i = 0; i < 100; ++i) {
-    mcp2518_read_register(cREGADDR_CiCON + 2, &info, 1);
+    mcp25xxfd_read_register(cREGADDR_CiCON + 2, &info, 1);
     current = info.data.body.byte[0] >> 5;
     if (current == mode) {
       return 0;
@@ -385,13 +392,13 @@ uint8_t mcp2518_change_mode(uint8_t mode) {
   return 1;
 }
 
-can_message_t *mcp2518_get_rx_message() {
+can_message_t *mcp25xxfd_get_rx_message() {
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH2;
 
   union SpiRegister reg;
   // read interrupt flags
   uint16_t address = cREGADDR_CiFIFOSTA + (channel * CiFIFO_OFFSET);
-  mcp2518_read_register(address, &reg, 1);
+  mcp25xxfd_read_register(address, &reg, 1);
   CAN_RX_FIFO_EVENT flags = reg.data.body.byte[0] & CAN_RX_FIFO_ALL_EVENTS;
 
   if ((flags & CAN_RX_FIFO_NOT_EMPTY_EVENT) == 0) {
@@ -401,21 +408,21 @@ can_message_t *mcp2518_get_rx_message() {
 
   // Resolve the FIFO address
   uint16_t register_address = cREGADDR_CiFIFOUA + channel * CiFIFO_OFFSET;
-  mcp2518_read_register(register_address, &reg, 2);
+  mcp25xxfd_read_register(register_address, &reg, 2);
   uint16_t fifo_address = reg.data.body.word + cRAMADDR_START;
 
   // Fetch the FIFO data
   can_message_t *message = can_create_message();
   union SpiRxMessage *rx = make_rx_message(message);
   uint8_t bytes_to_read = PAYLOAD_SIZE + 10; // 10: header bytes
-  rx->data.header[0] = MCP2518_READ | (fifo_address >> 8);
+  rx->data.header[0] = MCP25xxFD_READ | (fifo_address >> 8);
   rx->data.header[1] = fifo_address & 0xff;
   platform_write_spi(rx->buffer, bytes_to_read);
 
   // UINC channel
   register_address = cREGADDR_CiFIFOCON + (channel * CiFIFO_OFFSET) + 1;
   reg.data.body.byte[0] = 0x1; // UINC
-  mcp2518_write_register(register_address, &reg, 1);
+  mcp25xxfd_write_register(register_address, &reg, 1);
 
   // Build the message
   // The header part will be overwritten, make copies first

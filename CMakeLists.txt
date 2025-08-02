@@ -1,12 +1,36 @@
 cmake_minimum_required(VERSION 3.10)
 project(can_controller C)
 
+# Check DEVICE selection
+if(NOT DEFINED DEVICE)
+    if(DEFINED ENV{DEVICE})
+        set(DEVICE $ENV{DEVICE})
+    else()
+        message(FATAL_ERROR "DEVICE not defined. Set -DDEVICE=mcp2518fd or -DDEVICE=mcp2515")
+    endif()
+endif()
+
+message(STATUS "Selected device: ${DEVICE}")
+
 # Source files
 set(SOURCES
     api.c
     lib.c
-    mcp2518.c
 )
+
+# Append device-specific source
+if(DEVICE STREQUAL "mcp2518fd")
+    list(APPEND SOURCES mcp25xxfd.c)
+    add_definitions(-DMCP2518FD)
+elseif(DEVICE STREQUAL "mcp2517fd")
+    list(APPEND SOURCES mcp25xxfd.c)
+    add_definitions(-DMCP2517FD)
+elseif(DEVICE STREQUAL "mcp2515")
+    list(APPEND SOURCES mcp2515.c)
+    add_definitions(-DMCP2515)
+else()
+    message(FATAL_ERROR "Unknown DEVICE: ${DEVICE}")
+endif()
 
 # Platform selection via CMake variable
 # Usage: cmake -DPLATFORM=RASPBERRY_PI ..

@@ -5,10 +5,13 @@ This library provides access to CAN drivers from various platforms.
 
 Coverages of support are currently:
 
-|              | mcp2515 |
-| ------------ | :-----: |
-| PSoC         |    v    |
-| Raspberry Pi |    v    |
+|              | MCP2515 | MCP2518FD | MCP2517FD |
+| ------------ | :-----: | :-------: | :-------: |
+| PSoC         |    v    |    x      |  x        |
+| Raspberry Pi |    v    |    v      |  x        |
+
+v: supported<br />
+x: untested
 
 ## Getting Started
 The CAN bus speed is configured to 1 Mbps in this library.
@@ -147,7 +150,10 @@ The cmake takes the following variables:
 Example of the cmake usage:
 
 ```
-cmake -DPLATFORM=raspberry-pi -DSUPPORT_CALLBACK_INJECTION=true \
+cmake \
+    -DDEVICE=mcp2518fd \
+    -DPLATFORM=raspberry-pi \
+    -DSUPPORT_CALLBACK_INJECTION=true \
     -B build .
 cmake --build build
 ```
