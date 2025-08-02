@@ -48,6 +48,9 @@ static void mcp2518_read_register(uint16_t address, union SpiRegister *info,
 static void mcp2518_write_register(uint16_t address, union SpiRegister *info,
                                    size_t length);
 
+static union SpiTxMessage *make_tx_message(can_message_t *message);
+static union SpiRxMessage *make_rx_message(can_message_t *message);
+
 static void mcp2518_reset();
 static uint8_t mcp2518_config_osc();
 static uint8_t mcp2518_config_io();
@@ -104,25 +107,6 @@ void handle_rx() {
   }
 }
 
-static union SpiTxMessage *make_tx_message(can_message_t *message) {
-  union SpiTxMessage *tx = (union SpiTxMessage *)(message->data - 10);
-  uint32_t id = message->id;
-  uint8_t dlc = message->data_length & 0xf;
-  uint8_t is_remote = message->is_remote;
-  uint8_t is_extended = message->is_extended;
-  memset(&tx->data.message.id, 0, 8);
-  if (is_extended) {
-    tx->data.message.ctrl.IDE = 1;
-    tx->data.message.id.EID = id & 0x3ffff;
-    tx->data.message.id.SID = id >> 18;
-  } else {
-    tx->data.message.id.SID = id & 0x7ff;
-  }
-  tx->data.message.ctrl.RTR = is_remote;
-  tx->data.message.ctrl.DLC = dlc;
-  return tx;
-}
-
 void can_send_message(can_message_t *message) {
   uint8_t dlc = message->data_length;
   union SpiTxMessage *tx = make_tx_message(message);
@@ -148,6 +132,30 @@ void can_send_message(can_message_t *message) {
 
 ////////////////////////////////////////////////////////////
 
+union SpiTxMessage *make_tx_message(can_message_t *message) {
+  union SpiTxMessage *tx = (union SpiTxMessage *)(message->data - 10);
+  uint32_t id = message->id;
+  uint8_t dlc = message->data_length & 0xf;
+  uint8_t is_remote = message->is_remote;
+  uint8_t is_extended = message->is_extended;
+  memset(&tx->data.message.id, 0, 8);
+  if (is_extended) {
+    tx->data.message.ctrl.IDE = 1;
+    tx->data.message.id.EID = id & 0x3ffff;
+    tx->data.message.id.SID = id >> 18;
+  } else {
+    tx->data.message.id.SID = id & 0x7ff;
+  }
+  tx->data.message.ctrl.RTR = is_remote;
+  tx->data.message.ctrl.DLC = dlc;
+  return tx;
+}
+
+union SpiRxMessage *make_rx_message(can_message_t *message) {
+  union SpiRxMessage *rx = (union SpiRxMessage *)(message->data - 10);
+  return rx;
+}
+
 // MCP2518 SPI operations ///////////////////////////////////////////
 void mcp2518_read_register(uint16_t address, union SpiRegister *info,
                            size_t length) {
@@ -168,6 +176,8 @@ void mcp2518_reset() {
   platform_write_spi(buf, 2);
   platform_sleep_ms(10);
 }
+
+// MCP2518 methods //////////////////////////////////////////////////
 
 uint8_t mcp2518_config_osc() {
   union SpiRegister info = {0};
@@ -250,7 +260,7 @@ uint8_t mcp2518_config_interrupt() {
 uint8_t mcp2518_config_can_control() {
   REG_CiCON can_ctl;
   can_ctl.word = canControlResetValues[cREGADDR_CiCON / 4];
-  can_ctl.bF.TxBandWidthSharing = 0;
+  can_ctl.bF.TxBandWidthSharing = CAN_TXBWS_NO_DELAY;
   can_ctl.bF.TXQEnable = 0;
   can_ctl.bF.StoreInTEF = 0;
   can_ctl.bF.SystemErrorToListenOnly = 0;
@@ -373,11 +383,6 @@ uint8_t mcp2518_change_mode(uint8_t mode) {
   }
   fprintf(stderr, "Setting mode to %x failed; current=%x\n", mode, current);
   return 1;
-}
-
-static union SpiRxMessage *make_rx_message(can_message_t *message) {
-  union SpiRxMessage *rx = (union SpiRxMessage *)(message->data - 10);
-  return rx;
 }
 
 can_message_t *mcp2518_get_rx_message() {
