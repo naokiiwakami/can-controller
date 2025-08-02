@@ -173,9 +173,9 @@ uint8_t mcp2518_config_osc() {
   union SpiRegister info = {0};
   // Set OSC
   info.data.body.byte[0] = 0x0; // no PLL, no LP, no clock divisers
-  mcp2518_write_register(OSC, &info, 1);
+  mcp2518_write_register(cREGADDR_OSC, &info, 1);
   // check OSC status
-  mcp2518_read_register(OSC, &info, 2);
+  mcp2518_read_register(cREGADDR_OSC, &info, 2);
   if ((info.data.body.byte[1] & 0x4) == 0) {
     fprintf(stderr, "Clock is not ready\n");
     return 1;
@@ -193,11 +193,11 @@ uint8_t mcp2518_config_osc() {
 
 uint8_t mcp2518_config_io() {
   union SpiRegister info = {0};
-  mcp2518_read_register(IOCON + 3, &info, 1);
+  mcp2518_read_register(cREGADDR_IOCON + 3, &info, 1);
   info.data.body.byte[0] &=
       0xfc; // PM1 (rx) and PM0 (tx) are used for interrupt pints
-  mcp2518_write_register(IOCON + 3, &info, 1);
-  mcp2518_read_register(IOCON, &info, 4);
+  mcp2518_write_register(cREGADDR_IOCON + 3, &info, 1);
+  mcp2518_read_register(cREGADDR_IOCON, &info, 4);
   if (info.data.body.byte[3] != 0) {
     fprintf(stderr, "Failed to set up interrupt pings: %02x\n",
             info.data.body.byte[3]);
@@ -237,63 +237,67 @@ uint8_t mcp2518_config_bit_time() {
 }
 
 uint8_t mcp2518_config_interrupt() {
+  // enable receive FIFO interrupt
+  REG_CiINTENABLE enables;
+  enables.word = 0;
+  enables.IE.RXIE = 1;
   union SpiRegister info = {0};
-  info.data.body.byte[0] = 0x2; // Set RXIE
-  mcp2518_write_register(C1INT + 2, &info, 1);
+  info.data.body.word = enables.word;
+  mcp2518_write_register(cREGADDR_CiINTENABLE, &info, 1);
   return 0;
 }
 
 uint8_t mcp2518_config_can_control() {
+  REG_CiCON can_ctl;
+  can_ctl.word = canControlResetValues[cREGADDR_CiCON / 4];
+  can_ctl.bF.TxBandWidthSharing = 0;
+  can_ctl.bF.TXQEnable = 0;
+  can_ctl.bF.StoreInTEF = 0;
+  can_ctl.bF.SystemErrorToListenOnly = 0;
+  can_ctl.bF.EsiInGatewayMode = 0;
+  can_ctl.bF.RestrictReTxAttempts = 0;
+
   union SpiRegister info = {0};
-  uint8_t txqen = 0;    // TXQ enabled
-  uint8_t stef = 0;     // Store in Transmit Event FIFO
-  uint8_t serr2lom = 0; // Transition to listen only mode on system error bit
-  uint8_t esigm = 0;    // transmit ESI in gateway mode
-  uint8_t rtxat = 0;    // restrict retransmission attempts
-  info.data.body.byte[0] =
-      txqen << 4 | stef << 3 | serr2lom << 2 | esigm << 1 | rtxat;
-  mcp2518_write_register(C1CON + 2, &info, 1);
+  info.data.body.word = can_ctl.word;
+  mcp2518_write_register(cREGADDR_CiCON + 2, &info, 1);
   return 0;
 }
 
 uint8_t mcp2518_config_txfifo() {
   // Use FIFO1 for TX
-  union SpiRegister info = {0};
-  uint8_t plsize =
-      CAN_PLSIZE_8;     // payload size, we support only classic CAN first
-  uint8_t fsize = 0x4;  // fifo size, 5 messages
-  uint8_t txat = 0x3;   // unlimited retransmission attempts
-  uint8_t txpri = 0x10; // transmit priority, setting medium
-  uint8_t txen = 1;     // use this as a transmit fifo
-  uint8_t rtren = 0;    // auto RTR
-  uint8_t rxtsen = 0;   // time stamp
-  uint8_t txatie = 0;   // transmit attempts exhausted interrupt
-  uint8_t rxovie = 0;   // overflow interrupt
-  uint8_t tferffie = 0; // tx/rx fifo empty/full interrupt
-  uint8_t tfhrfhie = 0; // tx/rx fifo half empty/half full interrupt
-  uint8_t tfnrfnie = 0; // tx/rx fifo not full/not empty interrupt
+  CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
-  info.data.body.byte[3] = plsize << 5 | fsize;
-  info.data.body.byte[2] = txat << 5 | txpri;
-  info.data.body.byte[1] = 0;
-  info.data.body.byte[0] = txen << 7 | rtren << 6 | rxtsen << 5 | txatie << 4 |
-                           rxovie << 3 | tferffie << 2 | tfhrfhie << 1 |
-                           tfnrfnie;
-  mcp2518_write_register(C1FIFOCON1, &info, 4);
+  union SpiRegister info = {0};
+
+  REG_CiFIFOCON fifo_con;
+  fifo_con.word = canFifoResetValues[0];
+  fifo_con.txBF.PayLoadSize = CAN_PLSIZE_8;
+  fifo_con.txBF.FifoSize = 0x4;    // 5 messages
+  fifo_con.txBF.TxAttempts = 0x3;  // unlimited
+  fifo_con.txBF.TxPriority = 0x10; // setting medium
+  fifo_con.txBF.TxEnable = 1;
+
+  info.data.body.word = fifo_con.word;
+
+  uint16_t address = cREGADDR_CiFIFOCON + channel * CiFIFO_OFFSET;
+  mcp2518_write_register(address, &info, 4);
   return 0;
 }
 
 uint8_t mcp2518_config_rxfifo() {
   // Use FIFO2 for RX
-  REG_CiFIFOCON fifo_ctl = {0};
-  fifo_ctl.rxBF.FifoSize = 0x1f;
-  fifo_ctl.rxBF.PayLoadSize = CAN_PLSIZE_8;
-  fifo_ctl.rxBF.RxNotEmptyIE = 1;
+  CAN_FIFO_CHANNEL channel = CAN_FIFO_CH2;
+
+  REG_CiFIFOCON fifo_con;
+  fifo_con.word = canFifoResetValues[0];
+  fifo_con.rxBF.FifoSize = 0x1f;
+  fifo_con.rxBF.PayLoadSize = CAN_PLSIZE_8;
+  fifo_con.rxBF.RxNotEmptyIE = 1;
 
   union SpiRegister info = {0};
-  info.data.body.word = fifo_ctl.word;
-  mcp2518_write_register(cREGADDR_CiFIFOCON + CAN_FIFO_CH2 * CiFIFO_OFFSET,
-                         &info, 4);
+  info.data.body.word = fifo_con.word;
+  uint16_t address = cREGADDR_CiFIFOCON + channel * CiFIFO_OFFSET;
+  mcp2518_write_register(address, &info, 4);
 
   info.data.body.word = 0;
   mcp2518_read_register(cREGADDR_CiINTENABLE, &info, 2);
@@ -353,15 +357,15 @@ uint8_t mcp2518_config_filter() {
 uint8_t mcp2518_change_mode(uint8_t mode) {
   // Set REQOP
   union SpiRegister info = {0};
-  mcp2518_read_register(C1CON + 3, &info, 1);
+  mcp2518_read_register(cREGADDR_CiCON + 3, &info, 1);
   info.data.body.byte[0] &= 0xf8;
   info.data.body.byte[0] |= mode & 0x7;
-  mcp2518_write_register(C1CON + 3, &info, 1);
+  mcp2518_write_register(cREGADDR_CiCON + 3, &info, 1);
 
   // Verify OPMOD
   uint8_t current;
   for (int i = 0; i < 100; ++i) {
-    mcp2518_read_register(C1CON + 2, &info, 1);
+    mcp2518_read_register(cREGADDR_CiCON + 2, &info, 1);
     current = info.data.body.byte[0] >> 5;
     if (current == mode) {
       return 0;

@@ -17,8 +17,8 @@
 // LSB first
 
 // MCP2518FD registers
-#define OSC 0xe00
-#define IOCON 0xe04
+// #define OSC 0xe00
+// #define IOCON 0xe04
 /*
 #define CRC 0xe08
 #define ECCCON 0xe0c
@@ -27,6 +27,7 @@
 */
 
 // CAN FD controller module registers
+/*
 #define C1CON 0x000
 #define C1NBTCFG 0x004
 #define C1DBTCFG 0x008
@@ -46,7 +47,9 @@
 #define C1TEFCON 0x040
 #define C1TEFSTA 0x044
 #define C1TEFUA 0x048
+*/
 // 0x04c reserved
+/*
 #define C1TXQCON 0x050
 #define C1TXQSTA 0x054
 #define C1TXQUA 0x058
@@ -66,5 +69,6 @@
 // filter object
 #define C1FLTOBJ0 0x1f0
 #define C1MASK0 0x1f4
+*/
 
 // Configuration values //////////////////////////////////////////////
