@@ -142,6 +142,8 @@ void can_send_message(can_message_t *message) {
   register_address = cREGADDR_CiFIFOCON + (channel * CiFIFO_OFFSET) + 1;
   reg.data.body.byte[0] = 0x3; // UINC + TXREQ
   mcp2518_write_register(register_address, &reg, 1);
+
+  can_free_message(message);
 }
 
 ////////////////////////////////////////////////////////////

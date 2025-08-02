@@ -3,4 +3,4 @@
 
 extern void initialize_api();
 
-#endif  // CAN_CONTROLLER_INTERNAL_H_
+#endif // CAN_CONTROLLER_INTERNAL_H_

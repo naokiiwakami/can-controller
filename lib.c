@@ -20,7 +20,7 @@ void platform_sleep_ms(uint32_t milliseconds) { usleep(milliseconds * 1000); }
 // SPI channel (0 for /dev/spidev0.0)
 #define SPI_CHANNEL 0
 
-#define SPI_SPEED 10000000  // 10MHz
+#define SPI_SPEED 10000000 // 10MHz
 
 // Use GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
 // See
@@ -54,7 +54,7 @@ void platform_write_spi(uint8_t *buffer, size_t length) {
   wiringPiSPIDataRW(SPI_CHANNEL, buffer, length);
 }
 
-#endif  // CONTROLLER_PLATFORM == raspberry_pi
+#endif // CONTROLLER_PLATFORM == raspberry_pi
 
 #ifdef CONTROLLER_PLATFORM_PSOC
 
@@ -67,9 +67,7 @@ int platform_init_spi() {
   return 0;
 }
 
-CY_ISR(ISR_RX0BF) {
-    handle_rx();
-}
+CY_ISR(ISR_RX0BF) { handle_rx(); }
 
 int platform_init_rx_interrupt() {
   // Enable interrupt to detect message received. Connect the RX0BF (11) pin
@@ -102,4 +100,4 @@ void platform_write_spi(uint8_t *buffer, size_t length) {
   }
 }
 
-#endif  // CONTROLLER_PLATFORM == raspberry_pi
+#endif // CONTROLLER_PLATFORM == raspberry_pi

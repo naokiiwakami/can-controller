@@ -18,10 +18,15 @@
 #include "can-controller/internal.h"
 #include "can-controller/lib.h"
 
+// Bytes before data array in a message object may be used as an SPI header.
+// Enough space is necessary.
+#define __CAN_MESSAGE_OFFSET 8
+#define __CAN_MESSAGE_ALLOC_SIZE (sizeof(can_message_t) + __CAN_MESSAGE_OFFSET)
+
 #ifdef __message_create_by_mempool
 #define MAX_NUM_MESSAGES 32
 typedef struct message_tray {
-  can_message_t message;
+  uint8_t padding[__CAN_MESSAGE_OFFSET] can_message_t message;
   struct message_tray *prev;
   struct message_tray *next;
 } message_tray_t;
@@ -68,24 +73,18 @@ uint8_t can_init() {
   return device_start_can();
 }
 
-#define __ALLOC_SIZE 24
-#define __CAN_MESSAGE_OFFSET (__ALLOC_SIZE - sizeof(can_message_t))
-
 can_message_t *can_create_message() {
   can_message_t *message = NULL;
 #ifdef __message_create_by_malloc
   // The message may be reused for sending and receiving data to/from the
-  // controller device via SPI interface. We allocate 8 byte header field before
-  // the 8 byte data in order to allow putting some preceding data, such as SPI
-  // command and CAN header fields. This sacrifices security as the message data
-  // may be overwritten but gives better performance and smaller memory
-  // footprints.
-  uint8_t *buffer = (uint8_t *)malloc(__ALLOC_SIZE);
-  fprintf(stderr, "alloc: %p\n", buffer);
-  memset(buffer, 0, __ALLOC_SIZE);
+  // controller device via SPI interface. We allocate 16 byte header field
+  // before the 8 byte data in order to allow putting some preceding data, such
+  // as SPI command and CAN header fields. This sacrifices security as the
+  // message data may be overwritten but gives better performance and smaller
+  // memory footprints.
+  uint8_t *buffer = (uint8_t *)malloc(__CAN_MESSAGE_ALLOC_SIZE);
+  memset(buffer, 0, __CAN_MESSAGE_ALLOC_SIZE);
   message = (can_message_t *)(buffer + __CAN_MESSAGE_OFFSET);
-  fprintf(stderr, "out message: %p, offset=%zu\n", message,
-          __CAN_MESSAGE_OFFSET);
 #endif // __message_create_by_malloc
 
 #ifdef __message_create_by_mempool
@@ -101,11 +100,8 @@ can_message_t *can_create_message() {
 }
 
 void can_free_message(can_message_t *message) {
-  fprintf(stderr, "in message: %p, offset=%zu\n", message,
-          __CAN_MESSAGE_OFFSET);
 #ifdef __message_create_by_malloc
   uint8_t *buffer = (uint8_t *)message - __CAN_MESSAGE_OFFSET;
-  fprintf(stderr, "free: %p\n", buffer);
   free(buffer);
 #endif
 #ifdef __message_create_by_mempool
