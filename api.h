@@ -14,15 +14,12 @@
 extern "C" {
 #endif
 
-/**
- * Initializes the can controller.
- *
- * @returns 0 on successful initialization. 1 on error.
- */
-extern uint8_t can_init();
+#define PAYLOAD_SIZE 8
 
-extern can_message_t *can_create_message();
-extern void can_free_message(can_message_t *message);
+// Each device must have implementations of following methods
+extern void handle_rx();
+extern uint8_t device_init();
+extern uint8_t device_start_can();
 
 /**
  * Sends a CAN message.
@@ -33,6 +30,18 @@ extern void can_free_message(can_message_t *message);
  * function, save them before calling.
  */
 extern void can_send_message(can_message_t *message);
+
+////////////////////////////////////////////////////////////////
+
+/**
+ * Initializes the can controller.
+ *
+ * @returns 0 on successful initialization. 1 on error.
+ */
+extern uint8_t can_init();
+
+extern can_message_t *can_create_message();
+extern void can_free_message(can_message_t *message);
 
 /**
  * Application specific callback function to handle a received message.
@@ -49,4 +58,4 @@ extern void can_set_rx_message_consumer(void (*callback)(can_message_t *));
 #ifdef __cplusplus
 }
 #endif
-#endif  // CAN_CONTROLLER_API_H_
+#endif // CAN_CONTROLLER_API_H_

@@ -6,17 +6,17 @@
 #include "can-controller/can_message.h"
 
 // MCP2515 SPI Commands
-#define MCP_RESET 0xc0           // 1100 0000
-#define MCP_READ 0x03            // 0000 0011
-#define MCP_READ_RX_BUFFER 0x90  // 1001 0nm0
-#define MCP_WRITE 0x02           // 0000 0010
-#define MCP_LOAD_TX_BUFFER 0x40  // 0100 0abc
-#define MCP_RTS_TXB0 0x81        // 1000 0001
-#define MCP_RTS_TXB1 0x82        // 1000 0010
-#define MCP_RTS_TXB2 0x84        // 1000 0100
-#define MCP_READ_STATUS 0xa0     // 1010 0000
-#define MCP_RX_STATUS 0xb0       // 1011 0000
-#define MCP_BIT_MODIFY 0x05      // 0000 0101
+#define MCP2515_RESET 0xc0           // 1100 0000
+#define MCP2515_READ 0x03            // 0000 0011
+#define MCP2515_READ_RX_BUFFER 0x90  // 1001 0nm0
+#define MCP2515_WRITE 0x02           // 0000 0010
+#define MCP2515_LOAD_TX_BUFFER 0x40  // 0100 0abc
+#define MCP2515_RTS_TXB0 0x81        // 1000 0001
+#define MCP2515_RTS_TXB1 0x82        // 1000 0010
+#define MCP2515_RTS_TXB2 0x84        // 1000 0100
+#define MCP2515_READ_STATUS 0xa0     // 1010 0000
+#define MCP2515_RX_STATUS 0xb0       // 1011 0000
+#define MCP2515_BIT_MODIFY 0x05      // 0000 0101
 
 // MCP2515 Registers /////////////////////////////////////////
 
@@ -201,21 +201,3 @@
 #define OP_MODE_LISTEN_ONLY (0b011 << 5)
 #define OP_MODE_CONFIGURATION (0b100 << 5)
 #define OP_MODE_MASK 0xe0
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-// MCP2515 admin methods
-extern uint8_t mcp2515_init();
-extern void mcp2515_reset();
-extern void mcp2515_send_message(can_message_t *message);
-
-// low-level data access methods to MCP2515 registers
-// buffer size must be length + 2
-extern uint8_t *mcp2515_read(uint8_t address, uint8_t *buffer, size_t length);
-extern void mcp2515_write_register(uint8_t address, uint8_t value);
-extern uint8_t mcp2515_read_register(uint8_t address);
-extern void mcp2515_bit_modify(uint8_t address, uint8_t mask, uint8_t data);
-#ifdef __cplusplus
-}
-#endif
