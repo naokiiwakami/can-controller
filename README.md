@@ -7,8 +7,8 @@ Coverages of support are currently:
 
 |              | MCP2515 | MCP2518FD | MCP2517FD |
 | ------------ | :-----: | :-------: | :-------: |
-| PSoC         |    v    |    x      |  x        |
-| Raspberry Pi |    v    |    v      |  x        |
+| PSoC         |    v    |     x     |     x     |
+| Raspberry Pi |    v    |     v     |     x     |
 
 v: supported<br />
 x: untested
@@ -142,10 +142,11 @@ or `free()` must not be used.  An object as a local variable must not be used, t
 The library provides `CMakeLists.txt` that makes a static link library.
 The cmake takes the following variables:
 
-| Variable Name              | Possible Values      | Required | Description                                     |
-| -------------------------- | -------------------- | -------- | ----------------------------------------------- |
-| PLATFORM                   | raspberry-pi or psoc | yes      | Specifies the target platform                   |
-| SUPPORT_CALLBACK_INGESTION | true or false        |          | Provides RX callback injection function if true |
+| Variable Name              | Possible Values                  | Required | Description                                     |
+| -------------------------- | -------------------------------- | -------- | ----------------------------------------------- |
+| DEVICE                     | mcp2518fd, mcp2517fd, or mcp2515 | yes      | CAN controller type                             |
+| PLATFORM                   | raspberry-pi or psoc             | yes      | Specifies the target platform                   |
+| SUPPORT_CALLBACK_INGESTION | true or false                    |          | Provides RX callback injection function if true |
 
 Example of the cmake usage:
 

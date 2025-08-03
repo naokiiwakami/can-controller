@@ -68,6 +68,7 @@ static uint8_t mcp25xxfd_config_txfifo();
 static uint8_t mcp25xxfd_config_rxfifo();
 static uint8_t mcp25xxfd_config_filter();
 static uint8_t mcp25xxfd_change_mode(uint8_t mode);
+static uint8_t mcp25xxfd_start();
 
 static can_message_t *mcp25xxfd_get_rx_message();
 
@@ -99,7 +100,7 @@ uint8_t device_init() {
   if (mcp25xxfd_config_filter()) {
     return 1;
   }
-  return mcp25xxfd_change_mode(CAN_CLASSIC_MODE);
+  return mcp25xxfd_start();
 }
 
 uint8_t device_start_can() { return 0; }
@@ -210,12 +211,21 @@ uint8_t mcp25xxfd_config_osc() {
 
 uint8_t mcp25xxfd_config_io() {
   union SpiRegister info = {0};
-  mcp25xxfd_read_register(cREGADDR_IOCON + 3, &info, 1);
-  info.data.body.byte[0] &=
-      0xfc; // PM1 (rx) and PM0 (tx) are used for interrupt pints
-  mcp25xxfd_write_register(cREGADDR_IOCON + 3, &info, 1);
   mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
-  if (info.data.body.byte[3] != 0) {
+  REG_IOCON io_con;
+  io_con.word = info.data.body.word;
+  // Use this pin for RX interrupt
+  io_con.bF.PinMode1 = 0;
+  // Use this pin for GPIO to control tranceiver stand-by
+  io_con.bF.PinMode0 = 1;
+  io_con.bF.LAT0 = 1;
+  io_con.bF.GPIO0 = 1;
+  io_con.bF.TRIS0 = 1;
+
+  info.data.body.word = io_con.word;
+  mcp25xxfd_write_register(cREGADDR_IOCON, &info, 4);
+  mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
+  if ((info.data.body.byte[3] & 0x2) != 0) {
     fprintf(stderr, "Failed to set up interrupt pings: %02x\n",
             info.data.body.byte[3]);
     return 1;
@@ -368,6 +378,23 @@ uint8_t mcp25xxfd_config_filter() {
   // link filter to the RX fifo, then enable the filter
   mcp25xxfd_link_filter_to_fifo(CAN_FILTER0, CAN_FIFO_CH2, 1);
 
+  return 0;
+}
+
+uint8_t mcp25xxfd_start() {
+  if (mcp25xxfd_change_mode(CAN_CLASSIC_MODE)) {
+    return 1;
+  }
+
+  // Reset GPIO0 pin to enable the CAN tranceiver
+  union SpiRegister info = {0};
+  mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
+  REG_IOCON io_con;
+  io_con.word = info.data.body.word;
+  io_con.bF.LAT0 = 0;
+  io_con.bF.TRIS0 = 0;
+  info.data.body.word = io_con.word;
+  mcp25xxfd_write_register(cREGADDR_IOCON, &info, 4);
   return 0;
 }
 
