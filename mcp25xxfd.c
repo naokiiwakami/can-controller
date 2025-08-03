@@ -68,7 +68,6 @@ static uint8_t mcp25xxfd_config_txfifo();
 static uint8_t mcp25xxfd_config_rxfifo();
 static uint8_t mcp25xxfd_config_filter();
 static uint8_t mcp25xxfd_change_mode(uint8_t mode);
-static uint8_t mcp25xxfd_start();
 
 static can_message_t *mcp25xxfd_get_rx_message();
 
@@ -100,10 +99,26 @@ uint8_t device_init() {
   if (mcp25xxfd_config_filter()) {
     return 1;
   }
-  return mcp25xxfd_start();
+  return 0;
 }
 
-uint8_t device_start_can() { return 0; }
+uint8_t device_start_can() {
+  // Change the controller to classic CAN mode
+  if (mcp25xxfd_change_mode(CAN_CLASSIC_MODE)) {
+    return 1;
+  }
+
+  // Reset GPIO0 pin to enable the CAN tranceiver
+  union SpiRegister info = {0};
+  mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
+  REG_IOCON io_con;
+  io_con.word = info.data.body.word;
+  io_con.bF.LAT0 = 0;
+  io_con.bF.TRIS0 = 0;
+  info.data.body.word = io_con.word;
+  mcp25xxfd_write_register(cREGADDR_IOCON, &info, 4);
+  return 0;
+}
 
 void handle_rx() {
   for (;;) {
@@ -378,23 +393,6 @@ uint8_t mcp25xxfd_config_filter() {
   // link filter to the RX fifo, then enable the filter
   mcp25xxfd_link_filter_to_fifo(CAN_FILTER0, CAN_FIFO_CH2, 1);
 
-  return 0;
-}
-
-uint8_t mcp25xxfd_start() {
-  if (mcp25xxfd_change_mode(CAN_CLASSIC_MODE)) {
-    return 1;
-  }
-
-  // Reset GPIO0 pin to enable the CAN tranceiver
-  union SpiRegister info = {0};
-  mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
-  REG_IOCON io_con;
-  io_con.word = info.data.body.word;
-  io_con.bF.LAT0 = 0;
-  io_con.bF.TRIS0 = 0;
-  info.data.body.word = io_con.word;
-  mcp25xxfd_write_register(cREGADDR_IOCON, &info, 4);
   return 0;
 }
 
