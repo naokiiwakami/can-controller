@@ -70,7 +70,7 @@ uint8_t can_init() {
     return 1;
   }
 
-  return device_start_can();
+  return 0;
 }
 
 can_message_t *can_create_message() {

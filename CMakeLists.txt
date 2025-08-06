@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(can_controller C)
 
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
 # Check DEVICE selection
 if(NOT DEFINED DEVICE)
     if(DEFINED ENV{DEVICE})
@@ -43,6 +45,9 @@ if(NOT DEFINED PLATFORM)
 endif()
 
 message(STATUS "Selected platform: ${PLATFORM}")
+
+# set compile options
+add_compile_options(-Wall -Werror)
 
 # Set compile definitions
 if(PLATFORM STREQUAL "raspberry-pi")

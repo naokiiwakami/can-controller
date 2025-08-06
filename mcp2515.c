@@ -31,8 +31,28 @@ uint8_t device_init() {
   return 0;
 }
 
-uint8_t device_start_can() {
- // set to normal mode
+void *can_filter_start_config() {
+  return NULL; // unsupported
+}
+
+int can_filter_clear(void *handle) {
+  return -3; // unimplemented
+}
+
+int can_filter_add_std_id_gte(void *handle, uint16_t lower_boundary) {
+  return -3; // unimplemented
+}
+
+int can_filter_add_ext_id_all(void *handle) {
+  return -3; // unimplemented
+}
+
+int can_filter_apply_config(void *handle) {
+  return -3; // unimplemented
+}
+
+uint8_t can_start() {
+  // set to normal mode
   mcp2515_bit_modify(CANCTRL, OP_MODE_MASK, OP_MODE_NORMAL);
   return 0;
 }
@@ -40,7 +60,7 @@ uint8_t device_start_can() {
 void mcp2515_reset() {
   uint8_t buf[1] = {MCP2515_RESET};
   platform_write_spi(buf, 1);
-  platform_sleep_ms(10);  // Wait 10ms for reset
+  platform_sleep_ms(10); // Wait 10ms for reset
 }
 
 void mcp2515_configure_1meg_bps() {
@@ -54,37 +74,37 @@ void mcp2515_configure_1meg_bps() {
 }
 
 void mcp2515_configure_receive_buffer_0() {
-#define RXB0CTRL_RXM 0b11  // catch 'em all
-#define RXB0CTRL_RXM_BIT \
-  5  // bit 6-5 RXM<1:0>: R/W-00: Receive Buffer Operating mode bits
-     //         11 = Turn mask/filters off; receive any message
-     //         10 = Receive only valid messages with extended identifiers that
-     //         meet filter criteria 01 = Receive only valid messages with
-     //         standard identifiers that meet filter criteria. Extended ID
-     //         filter
-     //           registers RXFnEID8:RXFnEID0 are ignored for the messages with
-     //           standard IDs.
-     //         00 = Receive all valid messages using either standard or
-     //         extended identifiers that meet filter criteria.
-     //           Extended ID filter registers RXFnEID8:RXFnEID0 are applied to
-     //           first two bytes of data in the messages with standard IDs.
-#define RXB0CTRL_RXRTR_BIT \
-  3  // bit 3   RXRTR: R-0: Received Remote Transfer Request bit
-     //         1 = Remote Transfer Request Received
-     //         0 = No Remote Transfer Request Received
+#define RXB0CTRL_RXM 0b11 // catch 'em all
+#define RXB0CTRL_RXM_BIT                                                       \
+  5 // bit 6-5 RXM<1:0>: R/W-00: Receive Buffer Operating mode bits
+    //         11 = Turn mask/filters off; receive any message
+    //         10 = Receive only valid messages with extended identifiers that
+    //         meet filter criteria 01 = Receive only valid messages with
+    //         standard identifiers that meet filter criteria. Extended ID
+    //         filter
+    //           registers RXFnEID8:RXFnEID0 are ignored for the messages with
+    //           standard IDs.
+    //         00 = Receive all valid messages using either standard or
+    //         extended identifiers that meet filter criteria.
+    //           Extended ID filter registers RXFnEID8:RXFnEID0 are applied to
+    //           first two bytes of data in the messages with standard IDs.
+#define RXB0CTRL_RXRTR_BIT                                                     \
+  3 // bit 3   RXRTR: R-0: Received Remote Transfer Request bit
+    //         1 = Remote Transfer Request Received
+    //         0 = No Remote Transfer Request Received
 #define RXB0CTRL_BUKT 0
-#define RXB0CTRL_BUKT_BIT \
-  2  // bit 2   BUKT: R/W-0: Rollover Enable bit
-     //         1 = RXB0 message will rollover and be written to RXB1 if RXB0 is
-     //         full 0 = Rollover disabled
-#define RXB0CTRL_BUKT1_BIT \
-  1  // bit 1   BUKT1: R-0: Read-only Copy of BUKT bit (used internally bu the
-     // MCP2515)
-#define RXB0CTRL_FILHIT0_BIT \
-  0  // bit 0   FILHIT0: R-0: Filter Hit bit – indicates which acceptance filter
-     // enabled reception of message
-     //         1 = Acceptance Filter 1 (RXF1)
-     //         0 = Acceptance Filter 0 (RXF0)
+#define RXB0CTRL_BUKT_BIT                                                      \
+  2 // bit 2   BUKT: R/W-0: Rollover Enable bit
+    //         1 = RXB0 message will rollover and be written to RXB1 if RXB0 is
+    //         full 0 = Rollover disabled
+#define RXB0CTRL_BUKT1_BIT                                                     \
+  1 // bit 1   BUKT1: R-0: Read-only Copy of BUKT bit (used internally bu the
+    // MCP2515)
+#define RXB0CTRL_FILHIT0_BIT                                                   \
+  0 // bit 0   FILHIT0: R-0: Filter Hit bit – indicates which acceptance filter
+    // enabled reception of message
+    //         1 = Acceptance Filter 1 (RXF1)
+    //         0 = Acceptance Filter 0 (RXF0)
   uint8_t value =
       (RXB0CTRL_RXM << RXB0CTRL_RXM_BIT) + (RXB0CTRL_BUKT << RXB0CTRL_BUKT_BIT);
   mcp2515_write_register(RXB0CTRL, value);
@@ -92,61 +112,61 @@ void mcp2515_configure_receive_buffer_0() {
 
 void mcp2515_configure_receive_buffer_1() {
 #define RXB1CTRL_RXM 0b10
-#define RXB1CTRL_RXM_BIT \
-  5  // bit 6-5 RXM<1:0>: R/W-00: Receive Buffer Operating mode bits
-     //         11 = Turn mask/filters off; receive any message
-     //         10 = Receive only valid messages with extended identifiers that
-     //         meet filter criteria 01 = Receive only valid messages with
-     //         standard identifiers that meet filter criteria 00 = Receive all
-     //         valid messages using either standard or extended identifiers
-     //         that meet filter criteria
-#define RXB1CTRL_RXRTR_BIT \
-  3  // bit 3   RXRTR: R-0: Received Remote Transfer Request bit
-     //         1 = Remote Transfer Request Received
-     //         0 = No Remote Transfer Request Received
-#define RXB1CTRL_FILHIT_BIT \
-  0  // bit 2-0 FILHIT<2:0>: R-0: Filter Hit bits - indicates which acceptance
-     // filter enabled reception of message
-     //         101 = Acceptance Filter 5 (RXF5)
-     //         100 = Acceptance Filter 4 (RXF4)
-     //         011 = Acceptance Filter 3 (RXF3)
-     //         010 = Acceptance Filter 2 (RXF2)
-     //         001 = Acceptance Filter 1 (RXF1) (Only if BUKT bit set in
-     //         RXB0CTRL) 000 = Acceptance Filter 0 (RXF0) (Only if BUKT bit set
-     //         in RXB0CTRL)
+#define RXB1CTRL_RXM_BIT                                                       \
+  5 // bit 6-5 RXM<1:0>: R/W-00: Receive Buffer Operating mode bits
+    //         11 = Turn mask/filters off; receive any message
+    //         10 = Receive only valid messages with extended identifiers that
+    //         meet filter criteria 01 = Receive only valid messages with
+    //         standard identifiers that meet filter criteria 00 = Receive all
+    //         valid messages using either standard or extended identifiers
+    //         that meet filter criteria
+#define RXB1CTRL_RXRTR_BIT                                                     \
+  3 // bit 3   RXRTR: R-0: Received Remote Transfer Request bit
+    //         1 = Remote Transfer Request Received
+    //         0 = No Remote Transfer Request Received
+#define RXB1CTRL_FILHIT_BIT                                                    \
+  0 // bit 2-0 FILHIT<2:0>: R-0: Filter Hit bits - indicates which acceptance
+    // filter enabled reception of message
+    //         101 = Acceptance Filter 5 (RXF5)
+    //         100 = Acceptance Filter 4 (RXF4)
+    //         011 = Acceptance Filter 3 (RXF3)
+    //         010 = Acceptance Filter 2 (RXF2)
+    //         001 = Acceptance Filter 1 (RXF1) (Only if BUKT bit set in
+    //         RXB0CTRL) 000 = Acceptance Filter 0 (RXF0) (Only if BUKT bit set
+    //         in RXB0CTRL)
   uint8_t value = (RXB1CTRL_RXM << RXB1CTRL_RXM_BIT);
   mcp2515_write_register(RXB1CTRL, value);
 }
 
 void mcp2515_configure_RXnBF_pins() {
 #define BFPCTRL_B1BFS 0
-#define BFPCTRL_B1BFS_BIT \
-  5  // bit 5 B1BFS: R/W-0: RX1BF Pin State bit (Digital Output mode only)
-     //       - Reads as ‘0’ when RX1BF is configured as interrupt pin
+#define BFPCTRL_B1BFS_BIT                                                      \
+  5 // bit 5 B1BFS: R/W-0: RX1BF Pin State bit (Digital Output mode only)
+    //       - Reads as ‘0’ when RX1BF is configured as interrupt pin
 #define BFPCTRL_B0BFS 0
-#define BFPCTRL_B0BFS_BIT \
-  4  // bit 4 B0BFS: R/W-0: RX0BF Pin State bit (Digital Output mode only)
-     //       - Reads as ‘0’ when RX0BF is configured as interrupt pin
+#define BFPCTRL_B0BFS_BIT                                                      \
+  4 // bit 4 B0BFS: R/W-0: RX0BF Pin State bit (Digital Output mode only)
+    //       - Reads as ‘0’ when RX0BF is configured as interrupt pin
 #define BFPCTRL_B1BFE 0
-#define BFPCTRL_B1BFE_BIT \
-  3  // bit 3 B1BFE: R/W-0: RX1BF Pin Function Enable bit
-     //       1 = Pin function enabled, operation mode determined by B1BFM bit
-     //       0 = Pin function disabled, pin goes to high-impedance state
+#define BFPCTRL_B1BFE_BIT                                                      \
+  3 // bit 3 B1BFE: R/W-0: RX1BF Pin Function Enable bit
+    //       1 = Pin function enabled, operation mode determined by B1BFM bit
+    //       0 = Pin function disabled, pin goes to high-impedance state
 #define BFPCTRL_B0BFE 1
-#define BFPCTRL_B0BFE_BIT \
-  2  // bit 2 B0BFE: R/W-0: RX0BF Pin Function Enable bit
-     //       1 = Pin function enabled, operation mode determined by B0BFM bit
-     //       0 = Pin function disabled, pin goes to high-impedance state
+#define BFPCTRL_B0BFE_BIT                                                      \
+  2 // bit 2 B0BFE: R/W-0: RX0BF Pin Function Enable bit
+    //       1 = Pin function enabled, operation mode determined by B0BFM bit
+    //       0 = Pin function disabled, pin goes to high-impedance state
 #define BFPCTRL_B1BFM 0
-#define BFPCTRL_B1BFM_BIT \
-  1  // bit 1 B1BFM: R/W-0: RX1BF Pin Operation mode bit
-     //       1 = Pin is used as interrupt when valid message loaded into RXB1
-     //       0 = Digital Output mode
+#define BFPCTRL_B1BFM_BIT                                                      \
+  1 // bit 1 B1BFM: R/W-0: RX1BF Pin Operation mode bit
+    //       1 = Pin is used as interrupt when valid message loaded into RXB1
+    //       0 = Digital Output mode
 #define BFPCTRL_B0BFM 1
-#define BFPCTRL_B0BFM_BIT \
-  0  // bit 0 B0BFM: R/W-0: RX0BF Pin Operation mode bit
-     //       1 = Pin is used as interrupt when valid message loaded into RXB0
-     //       0 = Digital Output mode
+#define BFPCTRL_B0BFM_BIT                                                      \
+  0 // bit 0 B0BFM: R/W-0: RX0BF Pin Operation mode bit
+    //       1 = Pin is used as interrupt when valid message loaded into RXB0
+    //       0 = Digital Output mode
   uint8_t value = (BFPCTRL_B1BFS << BFPCTRL_B1BFS_BIT) +
                   (BFPCTRL_B0BFS << BFPCTRL_B0BFS_BIT) +
                   (BFPCTRL_B1BFE << BFPCTRL_B1BFE_BIT) +
@@ -184,7 +204,7 @@ inline static int mcp2515_set_can_id_std(can_message_t *message,
   uint32_t is_remote = message->is_remote;
   uint8_t data_length = message->data_length;
 
-  int index = 2;  // skips SPI request and the register address
+  int index = 2; // skips SPI request and the register address
 
   // SPI data part
   //
@@ -192,15 +212,15 @@ inline static int mcp2515_set_can_id_std(can_message_t *message,
   // TXBnSIDH: SID10  SID9  SID8  SID7  SID6  SID5  SID4  SID3
   // TXBnSIDL:  SID2  SID1  SID0   -   EXIDE   -   EID17 EID16
   id <<= 5;
-  buffer[index + 1] = (uint8_t)id;  // TXBnSIDL
+  buffer[index + 1] = (uint8_t)id; // TXBnSIDL
   id >>= 8;
-  buffer[index] = (uint8_t)id;  // TXBnSIDH
+  buffer[index] = (uint8_t)id; // TXBnSIDH
 
-  index += 4;  // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
+  index += 4; // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
 
   //             7     6     5     4     3     2     1     0
   // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
-  buffer[index++] = is_remote << 6 | data_length;  // TXBnDLC
+  buffer[index++] = is_remote << 6 | data_length; // TXBnDLC
 
   return index + data_length;
 }
@@ -211,7 +231,7 @@ inline static int mcp2515_set_can_id_ext(can_message_t *message,
   uint32_t is_remote = message->is_remote;
   uint8_t data_length = message->data_length;
 
-  int index = 2;  // skips SPI request and the register address
+  int index = 2; // skips SPI request and the register address
 
   // SPI data part
   //
@@ -220,21 +240,21 @@ inline static int mcp2515_set_can_id_ext(can_message_t *message,
   // TXBnSIDL:  SID2  SID1  SID0   -   EXIDE   -   EID17 EID16
   // TXBnEID8: EID15 EID14 EID13 EID12 EID11 EID10  EID9  EID8
   // TXBnEID0:  EID7  EID6  EID5  EID4  EID3  EID2  EID1  EID0
-  buffer[index + 3] = (uint8_t)id;  // TXBnEID0
+  buffer[index + 3] = (uint8_t)id; // TXBnEID0
   id >>= 8;
-  buffer[index + 2] = (uint8_t)id;  // TXBnEID8
+  buffer[index + 2] = (uint8_t)id; // TXBnEID8
   id >>= 8;
-  buffer[index + 1] = ((uint8_t)id & 0x3) | 0x8;  // TXBnSIDL
+  buffer[index + 1] = ((uint8_t)id & 0x3) | 0x8; // TXBnSIDL
   id <<= 3;
-  buffer[index + 1] |= (uint8_t)id & 0xe0;  // TXBnSIDL
+  buffer[index + 1] |= (uint8_t)id & 0xe0; // TXBnSIDL
   id >>= 8;
-  buffer[index] = (uint8_t)id;  // TXBnSIDH
+  buffer[index] = (uint8_t)id; // TXBnSIDH
 
-  index += 4;  // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
+  index += 4; // TXBnSIDH, TXBnSIDL, TXBnEID8, TXBnEID0
 
   //             7     6     5     4     3     2     1     0
   // TXBnDLC :   -    RTR     -    -   DLC3  DLC2  DLC1  DLC0
-  buffer[index++] = is_remote << 6 | data_length;  // TXBnDLC
+  buffer[index++] = is_remote << 6 | data_length; // TXBnDLC
 
   return index + data_length;
 }

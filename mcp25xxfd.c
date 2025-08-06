@@ -50,6 +50,18 @@ union SpiRxMessage {
   uint8_t buffer[PAYLOAD_SIZE + 10];
 };
 
+typedef struct __CanFilterConfig {
+  uint32_t modified;
+  REG_CiFLTCON_BYTE con;
+  REG_CiFLTOBJ obj;
+  REG_CiMASK mask;
+} can_filter_config_t;
+
+typedef struct __CanFilterAllConfigs {
+  uint32_t num_filters;
+  can_filter_config_t filters[CAN_FILTER_TOTAL];
+} can_filter_all_configs_t;
+
 static void mcp25xxfd_read_register(uint16_t address, union SpiRegister *info,
                                     size_t length);
 static void mcp25xxfd_write_register(uint16_t address, union SpiRegister *info,
@@ -66,14 +78,18 @@ static uint8_t mcp25xxfd_config_interrupt();
 static uint8_t mcp25xxfd_config_can_control();
 static uint8_t mcp25xxfd_config_txfifo();
 static uint8_t mcp25xxfd_config_rxfifo();
-static uint8_t mcp25xxfd_config_filter();
+static uint8_t mcp25xxfd_config_default_filter();
 static uint8_t mcp25xxfd_change_mode(uint8_t mode);
 
 static can_message_t *mcp25xxfd_get_rx_message();
 
-////////////////////////////////////////////////////////////
+#ifdef DEBUG
+static void dump_filter(CAN_FILTER channel)
+#endif
 
-uint8_t device_init() {
+    // Implementation of API methods ///////////////////////////////////
+
+    uint8_t device_init() {
   mcp25xxfd_reset();
   if (mcp25xxfd_config_osc()) {
     return 1;
@@ -96,13 +112,201 @@ uint8_t device_init() {
   if (mcp25xxfd_config_rxfifo()) {
     return 1;
   }
-  if (mcp25xxfd_config_filter()) {
+  if (mcp25xxfd_config_default_filter()) {
     return 1;
   }
   return 0;
 }
 
-uint8_t device_start_can() {
+static void load_filters(can_filter_all_configs_t *config) {
+  config->num_filters = 0;
+  union SpiRegister con_info = {0};
+  // read filter
+  for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
+       ++channel) {
+    can_filter_config_t *filter = &config->filters[channel];
+    filter->modified = 0;
+    uint32_t offset = channel % 4;
+    uint16_t address;
+    if (offset == 0) {
+      address = cREGADDR_CiFLTCON + channel;
+      mcp25xxfd_read_register(address, &con_info, 4);
+    }
+    filter->con.byte = con_info.data.body.byte[offset];
+    if (filter->con.bF.Enable) {
+      // assuming filters are contiguous
+      ++config->num_filters;
+    } else {
+      filter->obj.word = 0;
+      filter->mask.word = 0;
+      continue;
+    }
+
+    union SpiRegister info = {0};
+    address = cREGADDR_CiFLTOBJ + (channel * CiFILTER_OFFSET);
+    mcp25xxfd_read_register(address, &info, 4);
+    filter->obj.word = info.data.body.word;
+    address = cREGADDR_CiMASK + (channel * CiFILTER_OFFSET);
+    mcp25xxfd_read_register(address, &info, 4);
+    filter->mask.word = info.data.body.word;
+  }
+}
+
+void *can_filter_start_config() {
+  can_filter_all_configs_t *config =
+      (can_filter_all_configs_t *)malloc(sizeof(can_filter_all_configs_t));
+  load_filters(config);
+  return config;
+}
+
+int can_filter_clear(void *handle) {
+  can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
+  uint8_t modified = 0;
+  union SpiRegister con_info = {0};
+  for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
+       ++channel) {
+    can_filter_config_t *filter = &config->filters[channel];
+    uint32_t offset = channel % 4;
+    if (filter->con.bF.Enable) {
+      filter->con.bF.Enable = 0;
+      modified = 1;
+    }
+    con_info.data.body.byte[offset] = filter->con.byte;
+    if (offset == 3) {
+      if (modified) {
+        uint16_t address = cREGADDR_CiFLTCON + channel - offset;
+        mcp25xxfd_write_register(address, &con_info, 4);
+      }
+      modified = 0;
+    }
+  }
+  load_filters(config);
+  if (config->num_filters > 0) {
+    fprintf(stderr, "Failed to clear filters; %u remaining\n",
+            config->num_filters);
+    return -1;
+  }
+  return 0;
+}
+
+#define MAX_SID 0x7FF
+
+int can_filter_add_std_id_gte(void *handle, uint16_t lower_boundary) {
+  can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
+  if (lower_boundary > MAX_SID) {
+    fprintf(stderr, "lower_boundary exceeds CAN STD ID range: %04x",
+            lower_boundary);
+    return -1; // Invalid input
+  }
+
+  uint16_t start = lower_boundary;
+
+  while (start <= MAX_SID) {
+    uint16_t mask = 0x7FF; // Start with most specific mask
+    uint16_t step = 1;
+
+    // Try to find the largest block starting at 'start' that fits within the
+    // allowed range
+    for (int bit = 0; bit <= 10; bit++) {
+      uint16_t block_size = 1 << bit;
+      uint16_t aligned_start = start & ~(block_size - 1);
+
+      if (aligned_start != start) {
+        break; // Not aligned for this block size
+      }
+
+      if (start + block_size - 1 > MAX_SID) {
+        break; // Overflows SID range
+      }
+
+      mask = ~(block_size - 1) & 0x7FF;
+      step = block_size;
+    }
+
+    CAN_FILTER channel = config->num_filters;
+    if (channel >= CAN_FILTER_TOTAL) {
+      fprintf(stderr, "No more filter available");
+      return -2; // Too many filters needed
+    }
+
+    can_filter_config_t *filter = &config->filters[channel];
+    filter->obj.bF.EXIDE = 0;
+    filter->obj.bF.SID11 = 0;
+    filter->obj.bF.EID = 0;
+    filter->obj.bF.SID = start;
+    filter->mask.bF.MIDE = 1;
+    filter->mask.bF.MSID11 = 0;
+    filter->mask.bF.MEID = 0;
+    filter->mask.bF.MSID = mask;
+    filter->con.bF.Enable = 1;
+    filter->con.bF.BufferPointer = CAN_FIFO_CH2;
+    filter->modified = 1;
+
+    ++config->num_filters;
+    start += step;
+  }
+
+  return 0;
+}
+
+int can_filter_add_ext_id_all(void *handle) {
+  can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
+  if (config->num_filters >= CAN_FILTER_TOTAL) {
+    fprintf(stderr, "No more filter available");
+    return -2;
+  }
+  CAN_FILTER channel = config->num_filters++;
+  can_filter_config_t *filter = &config->filters[channel];
+  filter->obj.bF.EXIDE = 1;
+  filter->obj.bF.SID = 0;
+  filter->obj.bF.EID = 0;
+  filter->mask.bF.MIDE = 1;
+  filter->mask.bF.MEID = 0;
+  filter->mask.bF.MSID = 0;
+  filter->con.bF.Enable = 1;
+  filter->con.bF.BufferPointer = CAN_FIFO_CH2;
+  filter->modified = 1;
+  return 0;
+}
+
+int can_filter_apply_config(void *handle) {
+  can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
+
+  union SpiRegister con_info = {0};
+  uint8_t modified = 0;
+  for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
+       ++channel) {
+    uint16_t address;
+    can_filter_config_t *filter = &config->filters[channel];
+    if (filter->modified) {
+      modified = true;
+
+      union SpiRegister info = {0};
+      address = cREGADDR_CiFLTOBJ + (channel * CiFILTER_OFFSET);
+      info.data.body.word = filter->obj.word;
+      mcp25xxfd_write_register(address, &info, 4);
+
+      address = cREGADDR_CiMASK + (channel * CiFILTER_OFFSET);
+      info.data.body.word = filter->mask.word;
+      mcp25xxfd_write_register(address, &info, 4);
+    }
+
+    uint32_t offset = channel % 4;
+    con_info.data.body.byte[offset] = filter->con.byte;
+    if (offset == 3) {
+      if (modified) {
+        address = cREGADDR_CiFLTCON + channel - offset;
+        mcp25xxfd_write_register(address, &con_info, 4);
+      }
+      modified = 0;
+    }
+  }
+
+  free(config);
+  return 0;
+}
+
+uint8_t can_start() {
   // Change the controller to classic CAN mode
   if (mcp25xxfd_change_mode(CAN_CLASSIC_MODE)) {
     return 1;
@@ -375,7 +579,7 @@ static uint8_t mcp25xxfd_link_filter_to_fifo(CAN_FILTER filter,
   return 0;
 }
 
-uint8_t mcp25xxfd_config_filter() {
+uint8_t mcp25xxfd_config_default_filter() {
   uint16_t address;
   // disable filter 0
   mcp25xxfd_disable_filter(CAN_FILTER0);
@@ -464,3 +668,31 @@ can_message_t *mcp25xxfd_get_rx_message() {
 
   return message;
 }
+
+#ifdef DEBUG
+/**
+ * Dump a filter config.
+ */
+void dump_filter(CAN_FILTER channel) {
+  union SpiRegister info = {0};
+  can_filter_config_t filter = {0};
+  uint16_t address = cREGADDR_CiFLTCON + channel;
+  mcp25xxfd_read_register(address, &info, 1);
+  filter.con.byte = info.data.body.byte[0];
+  address = cREGADDR_CiFLTOBJ + (channel * CiFILTER_OFFSET);
+  mcp25xxfd_read_register(address, &info, 4);
+  filter.obj.word = info.data.body.word;
+  address = cREGADDR_CiMASK + (channel * CiFILTER_OFFSET);
+  mcp25xxfd_read_register(address, &info, 4);
+  filter.mask.word = info.data.body.word;
+  fprintf(stderr, "filter=%02x:\n", channel);
+  fprintf(stderr, "  enabled: %u\n", filter.con.bF.Enable);
+  fprintf(stderr, "  fifo: %02x\n", filter.con.bF.BufferPointer);
+  fprintf(stderr, "  EXIDE: %u\n", filter.obj.bF.EXIDE);
+  fprintf(stderr, "  EID: %03x\n", filter.obj.bF.EID);
+  fprintf(stderr, "  EID: %02x\n", filter.obj.bF.SID);
+  fprintf(stderr, "  MIDE: %u\n", filter.mask.bF.MIDE);
+  fprintf(stderr, "  MEID: %03x\n", filter.mask.bF.MEID);
+  fprintf(stderr, "  MSID: %03x\n", filter.mask.bF.MSID);
+}
+#endif

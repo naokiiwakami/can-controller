@@ -19,7 +19,6 @@ extern "C" {
 // Each device must have implementations of following methods
 extern void handle_rx();
 extern uint8_t device_init();
-extern uint8_t device_start_can();
 
 /**
  * Sends a CAN message.
@@ -39,6 +38,43 @@ extern void can_send_message(can_message_t *message);
  * @returns 0 on successful initialization. 1 on error.
  */
 extern uint8_t can_init();
+
+/**
+ * Start configuring ID filters.
+ *
+ * @returns Filter configuration handle. NULL if the device does not support
+ * filter configuration from users.
+ */
+extern void *can_filter_start_config();
+
+extern int can_filter_clear(void *handle);
+
+/**
+ * Set filter to accept IDs greater than or equal to a lower boundary.
+ *
+ * @param handle - Filter configuration handle
+ * @param lower_boundary - The lower boundary to accept IDs
+ *
+ * @returns 0 on successful configuration, -1 when the input is invalid, -2 when
+ * too many filters are needed.
+ */
+extern int can_filter_add_std_id_gte(void *handle, uint16_t lower_boundary);
+
+extern int can_filter_add_ext_id_all(void *handle);
+
+/**
+ * Apply the filter configuration.
+ *
+ * @param handle - Filter configuration handle.
+ */
+extern int can_filter_apply_config(void *handle);
+
+/**
+ * Start the can controller.
+ *
+ * @returns 0 on successful initialization. 1 on error.
+ */
+extern uint8_t can_start();
 
 extern can_message_t *can_create_message();
 extern void can_free_message(can_message_t *message);
