@@ -10,6 +10,7 @@
 // Raspberry Pi
 //
 #ifdef CONTROLLER_PLATFORM_RASPBERRY_PI
+#include <semaphore.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <wiringPi.h>
@@ -21,9 +22,12 @@ void platform_sleep_ms(uint32_t milliseconds) { usleep(milliseconds * 1000); }
 #define SPI_CHANNEL 0
 
 #if defined(MCP2518FD) || defined(MCP2517FD)
-#define SPI_SPEED 20000000 // 20MHz
+// 16MHz, The device accepts up to 20MHz but frequent communication errors
+// occur with the rate.
+#define SPI_SPEED 16000000
 #else
-#define SPI_SPEED 10000000 // 10MHz
+// 10MHz
+#define SPI_SPEED 10000000
 #endif
 
 // Use GPIO 1 pin (physical 28 pin) on the 40-pin Raspberry Pi.
