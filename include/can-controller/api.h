@@ -16,10 +16,6 @@ extern "C" {
 
 #define PAYLOAD_SIZE 8
 
-// Each device must have implementations of following methods
-extern void handle_rx();
-extern uint8_t device_init();
-
 /**
  * Sends a CAN message.
  *
@@ -33,11 +29,39 @@ extern void can_send_message(can_message_t *message);
 ////////////////////////////////////////////////////////////////
 
 /**
+ * Create default configuration.
+ *
+ * @returns default configuration
+ */
+extern can_config_t can_make_default_config();
+
+/**
+ * Sets bitrate.
+ *
+ * @param config The configuration object
+ * @param bitrate Bitrate in bps
+ * @returns 0 on successful configuration, 1 on erro
+ */
+extern int can_set_bitrate(can_config_t *config, uint32_t bitrate);
+
+/**
+ * Sets FD data bitrate.
+ *
+ * Calling this method also enables FD data transfer and bit rate switching
+ * (BRS).
+ *
+ * @param config The configuration object
+ * @param bitrate Bitrate in bps
+ * @returns 0 on successful configuration, 1 on erro
+ */
+extern int can_set_fd_data_bitrate(can_config_t *config, uint32_t bitrate);
+
+/**
  * Initializes the can controller.
  *
  * @returns 0 on successful initialization. 1 on error.
  */
-extern uint8_t can_init();
+extern uint8_t can_init(const can_config_t *config);
 
 /**
  * Start configuring ID filters.

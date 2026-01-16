@@ -15,20 +15,23 @@ endif()
 message(STATUS "Selected device: ${DEVICE}")
 
 # Source files
+set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 set(SOURCES
-    api.c
-    lib.c
+    ${SRC_DIR}/api.c
+    ${SRC_DIR}/lib.c
+    ${SRC_DIR}/bit-time.c
 )
 
 # Append device-specific source
 if(DEVICE STREQUAL "mcp2518fd")
-    list(APPEND SOURCES mcp25xxfd.c)
+    list(APPEND SOURCES ${SRC_DIR}/mcp25xxfd.c)
     add_definitions(-DMCP2518FD)
 elseif(DEVICE STREQUAL "mcp2517fd")
-    list(APPEND SOURCES mcp25xxfd.c)
+    list(APPEND SOURCES ${SRC_DIR}/mcp25xxfd.c)
     add_definitions(-DMCP2517FD)
 elseif(DEVICE STREQUAL "mcp2515")
-    list(APPEND SOURCES mcp2515.c)
+    list(APPEND SOURCES ${SRC_DIR}/mcp2515.c)
     add_definitions(-DMCP2515)
 else()
     message(FATAL_ERROR "Unknown DEVICE: ${DEVICE}")
@@ -65,5 +68,5 @@ endif()
 # Create static library
 add_library(can-controller STATIC ${SOURCES})
 target_include_directories(
-    can-controller PRIVATE ${CMAKE_SOURCE_DIR}/..)
+    can-controller PRIVATE ${CMAKE_SOURCE_DIR}/include)
 set_target_properties(can-controller PROPERTIES OUTPUT_NAME "can-controller")

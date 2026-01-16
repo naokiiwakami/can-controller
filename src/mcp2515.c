@@ -17,7 +17,12 @@ static void mcp2515_configure_receive_buffer_0();
 static void mcp2515_configure_receive_buffer_1();
 static void mcp2515_configure_RXnBF_pins();
 
-uint8_t device_init() {
+can_config_t can_make_default_config() {
+  can_config_t config = {0};
+  config.spi_speed_hz = 10000000; // 10 MHz
+}
+
+uint8_t device_init(can_config_t *config) {
   mcp2515_reset();
 
   // Set MCP2515 to Configuration mode

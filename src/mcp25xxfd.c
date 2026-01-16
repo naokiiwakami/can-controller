@@ -6,8 +6,6 @@
 #include "can-controller/device/mcp25xxfd_register.h"
 #include "can-controller/lib.h"
 
-#define MIN(x, y) ((x) < (y) ? (x) : (y))
-
 // MCP25xxFD SPI Instructions ///////////////////////////////
 #define MCP25xxFD_RESET 0x00      // C = 0b0000; A = 0x000
 #define MCP25xxFD_READ 0x30       // C = 0b0011; A; D = SDO
@@ -17,7 +15,7 @@
 #define MCP25xxFD_WRITE_SAFE 0xc0 // C = 0b1100; A; D = SDI; CRC = SDI
 
 // Private method declarations /////////////////////////////
-union SpiRegister {
+union RegisterSpiObject {
   struct __attribute__((__packed__)) RegisterData {
     uint8_t header[2];
     union RegisterBody {
@@ -28,7 +26,7 @@ union SpiRegister {
   uint8_t buffer[6];
 };
 
-union SpiTxMessage {
+union TxMessageSpiObject {
   struct __attribute__((__packed__)) TxMessageData {
     uint8_t header[2];
     struct __attribute__((__packed__)) TxMessage {
@@ -40,7 +38,7 @@ union SpiTxMessage {
   uint8_t buffer[PAYLOAD_SIZE + 10];
 };
 
-union SpiRxMessage {
+union RxMessageSpiObject {
   struct __attribute__((__packed__)) RxMessageData {
     uint8_t header[2];
     struct __attribute__((__packed__)) RxMessage {
@@ -64,20 +62,22 @@ typedef struct __CanFilterAllConfigs {
   can_filter_config_t filters[CAN_FILTER_TOTAL];
 } can_filter_all_configs_t;
 
-static void mcp25xxfd_read_register(uint16_t address, union SpiRegister *info,
+static void mcp25xxfd_read_register(uint16_t address,
+                                    union RegisterSpiObject *info,
                                     size_t length);
-static void mcp25xxfd_write_register(uint16_t address, union SpiRegister *info,
+static void mcp25xxfd_write_register(uint16_t address,
+                                     union RegisterSpiObject *info,
                                      size_t length);
 
-static union SpiTxMessage *make_tx_message(can_message_t *message);
-static union SpiRxMessage *make_rx_message(can_message_t *message);
+static union TxMessageSpiObject *make_tx_message(can_message_t *message);
+static union RxMessageSpiObject *make_rx_message(can_message_t *message);
 
 static void mcp25xxfd_reset();
-static uint8_t mcp25xxfd_config_osc();
+static uint8_t mcp25xxfd_config_osc(can_config_t *config);
 static uint8_t mcp25xxfd_config_io();
-static uint8_t mcp25xxfd_config_bit_time();
+static uint8_t mcp25xxfd_config_bit_time(const can_config_t *config);
 static uint8_t mcp25xxfd_config_interrupt();
-static uint8_t mcp25xxfd_config_can_control();
+static uint8_t mcp25xxfd_config_can_control(const can_config_t *config);
 static uint8_t mcp25xxfd_config_txfifo();
 static uint8_t mcp25xxfd_config_rxfifo();
 static uint8_t mcp25xxfd_config_default_filter();
@@ -86,26 +86,96 @@ static uint8_t mcp25xxfd_change_mode(uint8_t mode);
 static can_message_t *mcp25xxfd_get_rx_message();
 
 #ifdef DEBUG
-static void dump_filter(CAN_FILTER channel)
+static void dump_filter(CAN_FILTER channel);
 #endif
 
-    // Implementation of API methods ///////////////////////////////////
+// Implementation of API methods ///////////////////////////////////
 
-    uint8_t device_init() {
+can_config_t can_make_default_config() {
+  can_config_t config = {0};
+  // 16MHz, The device accepts up to 20MHz but frequent communication errors
+  // occur with the rate.
+  config.spi_speed_hz = 16000000;
+
+  // CAN controller
+  config.device.fd_mode = 1;
+  config.device.brs_enabled = 1;
+
+  // oscillator config
+  config.device.osc_clock_hz = 20000000;
+  config.device.pll_enabled = 0;
+
+  // bit time config sources
+  config.bt_config.bus_length = 10;
+  config.bt_config.tx_propergation_delay = 100; // from TCAN3413 datasheet
+  config.bt_config.rx_propergation_delay = 90;  // from TCAN3413 datasheet
+
+  config.device.nominal_baud_rate_prescale = 1;
+  config.device.data_baud_rate_prescale = 1;
+
+  uint32_t sys_clock =
+      config.device.osc_clock_hz * (config.device.pll_enabled ? 10 : 1);
+  uint32_t propergation_delay =
+      can_bt_get_propergation_delay(&config.bt_config);
+
+  config.bt_config.nominal_bt_src.bit_rate = 1000000;
+  config.bt_config.nominal_bt_src.split_point = 80;
+  config.bt_config.nominal_bt_src.clock =
+      sys_clock / config.device.nominal_baud_rate_prescale;
+  can_bt_calculate_bit_time_params(&config.bt_config.nominal_bt_params,
+                                   &config.bt_config.nominal_bt_src,
+                                   propergation_delay);
+
+  config.bt_config.data_bt_src.bit_rate = 4000000;
+  config.bt_config.data_bt_src.split_point = 80;
+  config.bt_config.data_bt_src.clock =
+      sys_clock / config.device.data_baud_rate_prescale;
+  can_bt_calculate_bit_time_params(&config.bt_config.data_bt_params,
+                                   &config.bt_config.data_bt_src,
+                                   propergation_delay);
+
+  return config;
+}
+
+int can_set_bitrate(can_config_t *config, uint32_t bitrate) {
+  config->bt_config.nominal_bt_src.bit_rate = bitrate;
+
+  uint32_t propergation_delay =
+      can_bt_get_propergation_delay(&config->bt_config);
+  can_bt_calculate_bit_time_params(&config->bt_config.nominal_bt_params,
+                                   &config->bt_config.nominal_bt_src,
+                                   propergation_delay);
+  return 0;
+}
+
+int can_set_fd_data_bitrate(can_config_t *config, uint32_t bitrate) {
+  config->bt_config.data_bt_src.bit_rate = bitrate;
+  config->device.fd_mode = 1;
+  config->device.brs_enabled = 1;
+
+  uint32_t propergation_delay =
+      can_bt_get_propergation_delay(&config->bt_config);
+  can_bt_calculate_bit_time_params(&config->bt_config.data_bt_params,
+                                   &config->bt_config.data_bt_src,
+                                   propergation_delay);
+  return 0;
+}
+
+uint8_t device_init(can_config_t *config) {
   mcp25xxfd_reset();
-  if (mcp25xxfd_config_osc()) {
+  if (mcp25xxfd_config_osc(config)) {
     return 1;
   }
   if (mcp25xxfd_config_io()) {
     return 1;
   }
-  if (mcp25xxfd_config_bit_time()) {
+  if (mcp25xxfd_config_bit_time(config)) {
     return 1;
   }
   if (mcp25xxfd_config_interrupt()) {
     return 1;
   }
-  if (mcp25xxfd_config_can_control()) {
+  if (mcp25xxfd_config_can_control(config)) {
     return 1;
   }
   if (mcp25xxfd_config_txfifo()) {
@@ -122,7 +192,7 @@ static void dump_filter(CAN_FILTER channel)
 
 static void load_filters(can_filter_all_configs_t *config) {
   config->num_filters = 0;
-  union SpiRegister con_info = {0};
+  union RegisterSpiObject con_info = {0};
   // read filter
   for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
        ++channel) {
@@ -144,7 +214,7 @@ static void load_filters(can_filter_all_configs_t *config) {
       continue;
     }
 
-    union SpiRegister info = {0};
+    union RegisterSpiObject info = {0};
     address = cREGADDR_CiFLTOBJ + (channel * CiFILTER_OFFSET);
     mcp25xxfd_read_register(address, &info, 4);
     filter->obj.word = info.data.body.word;
@@ -164,7 +234,7 @@ void *can_filter_start_config() {
 int can_filter_clear(void *handle) {
   can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
   uint8_t modified = 0;
-  union SpiRegister con_info = {0};
+  union RegisterSpiObject con_info = {0};
   for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
        ++channel) {
     can_filter_config_t *filter = &config->filters[channel];
@@ -274,7 +344,7 @@ int can_filter_add_ext_id_all(void *handle) {
 int can_filter_apply_config(void *handle) {
   can_filter_all_configs_t *config = (can_filter_all_configs_t *)handle;
 
-  union SpiRegister con_info = {0};
+  union RegisterSpiObject con_info = {0};
   uint8_t modified = 0;
   for (CAN_FILTER channel = CAN_FILTER0; channel < CAN_FILTER_TOTAL;
        ++channel) {
@@ -283,7 +353,7 @@ int can_filter_apply_config(void *handle) {
     if (filter->modified) {
       modified = true;
 
-      union SpiRegister info = {0};
+      union RegisterSpiObject info = {0};
       address = cREGADDR_CiFLTOBJ + (channel * CiFILTER_OFFSET);
       info.data.body.word = filter->obj.word;
       mcp25xxfd_write_register(address, &info, 4);
@@ -315,7 +385,7 @@ uint8_t can_start() {
   }
 
   // Reset GPIO0 pin to enable the CAN tranceiver
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
   REG_IOCON io_con;
   io_con.word = info.data.body.word;
@@ -338,11 +408,11 @@ void handle_rx() {
 
 void can_send_message(can_message_t *message) {
   uint8_t dlc = message->data_length;
-  union SpiTxMessage *tx = make_tx_message(message);
+  union TxMessageSpiObject *tx = make_tx_message(message);
 
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
-  union SpiRegister reg;
+  union RegisterSpiObject reg;
   uint16_t register_address = cREGADDR_CiFIFOUA + channel * CiFIFO_OFFSET;
   mcp25xxfd_read_register(register_address, &reg, 2);
   uint16_t fifo_address = reg.data.body.word + cRAMADDR_START;
@@ -361,8 +431,9 @@ void can_send_message(can_message_t *message) {
 
 ////////////////////////////////////////////////////////////
 
-union SpiTxMessage *make_tx_message(can_message_t *message) {
-  union SpiTxMessage *tx = (union SpiTxMessage *)(message->data - 10);
+union TxMessageSpiObject *make_tx_message(can_message_t *message) {
+  union TxMessageSpiObject *tx =
+      (union TxMessageSpiObject *)(message->data - 10);
   uint32_t id = message->id;
   uint8_t dlc = message->data_length & 0xf;
   uint8_t is_remote = message->is_remote;
@@ -384,20 +455,21 @@ union SpiTxMessage *make_tx_message(can_message_t *message) {
   return tx;
 }
 
-union SpiRxMessage *make_rx_message(can_message_t *message) {
-  union SpiRxMessage *rx = (union SpiRxMessage *)(message->data - 10);
+union RxMessageSpiObject *make_rx_message(can_message_t *message) {
+  union RxMessageSpiObject *rx =
+      (union RxMessageSpiObject *)(message->data - 10);
   return rx;
 }
 
 // MCP25xxFD SPI operations ///////////////////////////////////////////
-void mcp25xxfd_read_register(uint16_t address, union SpiRegister *info,
+void mcp25xxfd_read_register(uint16_t address, union RegisterSpiObject *info,
                              size_t length) {
   info->data.header[0] = MCP25xxFD_READ | (address >> 8);
   info->data.header[1] = address & 0xff;
   platform_write_spi(info->buffer, length + 2);
 }
 
-void mcp25xxfd_write_register(uint16_t address, union SpiRegister *info,
+void mcp25xxfd_write_register(uint16_t address, union RegisterSpiObject *info,
                               size_t length) {
   info->data.header[0] = MCP25xxFD_WRITE | (address >> 8);
   info->data.header[1] = address & 0xff;
@@ -412,17 +484,16 @@ void mcp25xxfd_reset() {
 
 // MCP25xxFD methods //////////////////////////////////////////////////
 
-uint8_t mcp25xxfd_config_osc() {
+uint8_t mcp25xxfd_config_osc(can_config_t *config) {
   // Set OSC
   REG_OSC osc = {0};
-  osc.bF.PllEnable = 0;  // 0: no PLL, 1: sysclk from 10x PLL
-  osc.bF.OscDisable = 0; // 0: Enable clock, 1: Clock disabled
+  osc.bF.PllEnable =
+      config->device.pll_enabled; // 0: no PLL, 1: sysclk from 10x PLL
+  osc.bF.OscDisable = 0;          // 0: Enable clock, 1: Clock disabled
   osc.bF.LowPowerModeEnable = 0;
   osc.bF.SCLKDIV = 0; // 0: divided by 1, 1: divided by 2
   osc.bF.CLKODIV = OSC_CLKO_DIV1;
-  osc.bF.PllReady = 0; // 0: PLL not ready, 1: PLL locked
-  osc.bF.OscReady = 0; //
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.word = osc.word;
   mcp25xxfd_write_register(cREGADDR_OSC, &info, 1);
   // check OSC status
@@ -443,7 +514,7 @@ uint8_t mcp25xxfd_config_osc() {
 }
 
 uint8_t mcp25xxfd_config_io() {
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   mcp25xxfd_read_register(cREGADDR_IOCON, &info, 4);
   REG_IOCON io_con;
   io_con.word = info.data.body.word;
@@ -466,63 +537,28 @@ uint8_t mcp25xxfd_config_io() {
   return 0;
 }
 
-// calculate propagation delay in ns
-static uint32_t get_propergation_delay(uint32_t bus_meters) {
-  const uint32_t kTxTranceiver = 100;   // ns, from TCAN3413 DS
-  const uint32_t kRxTranceiver = 90;    // ns, from TCAN3413 DS
-  const uint32_t kBusDelayPerMeter = 5; // ns, based on 2/3 the speed of light
+uint8_t mcp25xxfd_config_bit_time(const can_config_t *config) {
+  union RegisterSpiObject info = {0};
 
-  return 2 * (kBusDelayPerMeter * bus_meters + kTxTranceiver + kRxTranceiver);
-}
-
-uint8_t mcp25xxfd_config_bit_time() {
-  union SpiRegister info = {0};
-
-  const uint32_t kFsys = 20 * 1000 * 1000;
-  const uint32_t kNbr = 1 * 1000 * 1000; // nominal bit rate
-  const uint32_t kDbr = 4 * 1000 * 1000; // data bit rate
-  const uint32_t kNbrp = 1;              // baud rate prescaler
-  const uint32_t kDbrp = 1;              // baud rate prescaler
-  const uint32_t kBusMeters = 10;
-  const uint32_t kNsync = 1;
-  const uint32_t kNsp = 80;
-
-  uint32_t time_prop_seg = get_propergation_delay(kBusMeters);
-
-  // Nominal bit timing
-  uint32_t ntq = kNbrp * 1000000000 / kFsys; // time quanta in nano sec
-  uint32_t nbt = 1000000000 / kNbr;          // ns
-  uint32_t num_ntq = nbt / ntq;
-  uint32_t num_nprseg = (time_prop_seg + ntq - 1) / ntq;
-  uint32_t ntseg1 = kNsp * num_ntq / 100 - 1;
-  uint32_t ntseg2 = num_ntq - kNsync - ntseg1;
-  uint32_t nsjw = MIN(ntseg1 - num_nprseg, ntseg2);
-
-  // Data bit timing
-  uint32_t dtq = kDbrp * 1000000000 / kFsys; // time quanta in nano sec
-  uint32_t dbt = 1000000000 / kDbr;          // ns
-  uint32_t num_dtq = dbt / dtq;
-  uint32_t dtseg1 = kNsp * num_dtq / 100 - 1;
-  uint32_t dtseg2 = num_dtq - kNsync - dtseg1;
-  uint32_t dsjw = MIN(dtseg1, dtseg2);
-  uint32_t tdco = kDbrp * dtseg1;
+  uint32_t tdco = config->device.data_baud_rate_prescale *
+                  config->bt_config.data_bt_params.tseg1;
 
   // uint32_t nominal_time_quanta = nBrp
   REG_CiNBTCFG nbt_config = {0};
-  nbt_config.bF.BRP = kNbrp - 1;
-  nbt_config.bF.TSEG1 = ntseg1 - 1;
-  nbt_config.bF.TSEG2 = ntseg2 - 1;
-  nbt_config.bF.SJW = nsjw - 1;
+  nbt_config.bF.BRP = config->device.nominal_baud_rate_prescale - 1;
+  nbt_config.bF.TSEG1 = config->bt_config.nominal_bt_params.tseg1 - 1;
+  nbt_config.bF.TSEG2 = config->bt_config.nominal_bt_params.tseg2 - 1;
+  nbt_config.bF.SJW = config->bt_config.nominal_bt_params.sjw - 1;
 
   info.data.body.word = nbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiNBTCFG, &info, 4);
 
   REG_CiDBTCFG dbt_config = {0};
   REG_CiTDC tdc_config = {0};
-  dbt_config.bF.BRP = kDbrp - 1;
-  dbt_config.bF.TSEG1 = dtseg1 - 1;
-  dbt_config.bF.TSEG2 = dtseg2 - 1;
-  dbt_config.bF.SJW = dsjw - 1;
+  dbt_config.bF.BRP = config->device.data_baud_rate_prescale - 1;
+  dbt_config.bF.TSEG1 = config->bt_config.data_bt_params.tseg1 - 1;
+  dbt_config.bF.TSEG2 = config->bt_config.data_bt_params.tseg2 - 1;
+  dbt_config.bF.SJW = config->bt_config.data_bt_params.sjw - 1;
 
   info.data.body.word = dbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiDBTCFG, &info, 4);
@@ -542,13 +578,13 @@ uint8_t mcp25xxfd_config_interrupt() {
   REG_CiINTENABLE enables;
   enables.word = 0;
   enables.IE.RXIE = 1;
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.word = enables.word;
   mcp25xxfd_write_register(cREGADDR_CiINTENABLE, &info, 1);
   return 0;
 }
 
-uint8_t mcp25xxfd_config_can_control() {
+uint8_t mcp25xxfd_config_can_control(const can_config_t *config) {
   REG_CiCON can_ctl;
   can_ctl.word = canControlResetValues[cREGADDR_CiCON / 4];
   can_ctl.bF.TxBandWidthSharing = CAN_TXBWS_NO_DELAY;
@@ -557,8 +593,9 @@ uint8_t mcp25xxfd_config_can_control() {
   can_ctl.bF.SystemErrorToListenOnly = 0;
   can_ctl.bF.EsiInGatewayMode = 0;
   can_ctl.bF.RestrictReTxAttempts = 0;
+  can_ctl.bF.BitRateSwitchDisable = config->device.brs_enabled ? 0 : 1;
 
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.word = can_ctl.word;
   mcp25xxfd_write_register(cREGADDR_CiCON + 2, &info, 1);
   return 0;
@@ -568,7 +605,7 @@ uint8_t mcp25xxfd_config_txfifo() {
   // Use FIFO1 for TX
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
 
   REG_CiFIFOCON fifo_con;
   fifo_con.word = canFifoResetValues[0];
@@ -595,7 +632,7 @@ uint8_t mcp25xxfd_config_rxfifo() {
   fifo_con.rxBF.PayLoadSize = CAN_PLSIZE_8;
   fifo_con.rxBF.RxNotEmptyIE = 1;
 
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.word = fifo_con.word;
   uint16_t address = cREGADDR_CiFIFOCON + channel * CiFIFO_OFFSET;
   mcp25xxfd_write_register(address, &info, 4);
@@ -608,7 +645,7 @@ uint8_t mcp25xxfd_config_rxfifo() {
 }
 
 static uint8_t mcp25xxfd_disable_filter(CAN_FILTER filter) {
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   uint16_t address = cREGADDR_CiFLTCON + filter;
   mcp25xxfd_read_register(address, &info, 1);
   REG_CiFLTCON_BYTE filter_ctl;
@@ -627,7 +664,7 @@ static uint8_t mcp25xxfd_link_filter_to_fifo(CAN_FILTER filter,
   filter_ctl.bF.Enable = enable ? 1 : 0;
   filter_ctl.bF.BufferPointer = channel;
   uint16_t address = cREGADDR_CiFLTCON + filter;
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.byte[0] = filter_ctl.byte;
   mcp25xxfd_write_register(address, &info, 1);
 
@@ -641,7 +678,7 @@ uint8_t mcp25xxfd_config_default_filter() {
 
   // Configure filter 0 object and mask to match all
   CAN_FILTER filter = CAN_FILTER0;
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   info.data.body.word = 0;
   address = cREGADDR_CiFLTOBJ + (filter * CiFILTER_OFFSET);
   mcp25xxfd_write_register(address, &info, 4);
@@ -657,7 +694,7 @@ uint8_t mcp25xxfd_config_default_filter() {
 
 uint8_t mcp25xxfd_change_mode(uint8_t mode) {
   // Set REQOP
-  union SpiRegister info = {0};
+  union RegisterSpiObject info = {0};
   mcp25xxfd_read_register(cREGADDR_CiCON + 3, &info, 1);
   info.data.body.byte[0] &= 0xf8;
   info.data.body.byte[0] |= mode & 0x7;
@@ -679,7 +716,7 @@ uint8_t mcp25xxfd_change_mode(uint8_t mode) {
 can_message_t *mcp25xxfd_get_rx_message() {
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH2;
 
-  union SpiRegister reg;
+  union RegisterSpiObject reg;
   // read interrupt flags
   uint16_t address = cREGADDR_CiFIFOSTA + (channel * CiFIFO_OFFSET);
   mcp25xxfd_read_register(address, &reg, 1);
@@ -697,7 +734,7 @@ can_message_t *mcp25xxfd_get_rx_message() {
 
   // Fetch the FIFO data
   can_message_t *message = can_create_message();
-  union SpiRxMessage *rx = make_rx_message(message);
+  union RxMessageSpiObject *rx = make_rx_message(message);
   uint8_t bytes_to_read = PAYLOAD_SIZE + 10; // 10: header bytes
   rx->data.header[0] = MCP25xxFD_READ | (fifo_address >> 8);
   rx->data.header[1] = fifo_address & 0xff;

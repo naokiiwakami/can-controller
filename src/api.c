@@ -55,13 +55,13 @@ void initialize_api() {
 #endif
 }
 
-uint8_t can_init() {
+uint8_t can_init(const can_config_t *config) {
   initialize_api();
-  if (platform_init_spi()) {
+  if (platform_init_spi(config)) {
     return 1;
   }
 
-  if (device_init()) {
+  if (device_init(config)) {
     return 1;
   }
 
