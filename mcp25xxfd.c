@@ -6,6 +6,8 @@
 #include "can-controller/device/mcp25xxfd_register.h"
 #include "can-controller/lib.h"
 
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
 // MCP25xxFD SPI Instructions ///////////////////////////////
 #define MCP25xxFD_RESET 0x00      // C = 0b0000; A = 0x000
 #define MCP25xxFD_READ 0x30       // C = 0b0011; A; D = SDO
@@ -308,7 +310,7 @@ int can_filter_apply_config(void *handle) {
 
 uint8_t can_start() {
   // Change the controller to classic CAN mode
-  if (mcp25xxfd_change_mode(CAN_CLASSIC_MODE)) {
+  if (mcp25xxfd_change_mode(CAN_NORMAL_MODE)) {
     return 1;
   }
 
@@ -365,7 +367,9 @@ union SpiTxMessage *make_tx_message(can_message_t *message) {
   uint8_t dlc = message->data_length & 0xf;
   uint8_t is_remote = message->is_remote;
   uint8_t is_extended = message->is_extended;
-  memset(&tx->data.message.id, 0, 8);
+  uint8_t is_fd = message->is_fd;
+  uint8_t brs = message->brs;
+  memset(&tx->data.message.id, 0, 8); // CAN_MSGOBJ_ID + CAN_TX_MSGOBJ_CTRL
   if (is_extended) {
     tx->data.message.ctrl.IDE = 1;
     tx->data.message.id.EID = id & 0x3ffff;
@@ -373,8 +377,10 @@ union SpiTxMessage *make_tx_message(can_message_t *message) {
   } else {
     tx->data.message.id.SID = id & 0x7ff;
   }
-  tx->data.message.ctrl.RTR = is_remote;
   tx->data.message.ctrl.DLC = dlc;
+  tx->data.message.ctrl.FDF = is_fd;
+  tx->data.message.ctrl.RTR = is_fd ? 0 : is_remote;
+  tx->data.message.ctrl.BRS = brs;
   return tx;
 }
 
@@ -407,9 +413,17 @@ void mcp25xxfd_reset() {
 // MCP25xxFD methods //////////////////////////////////////////////////
 
 uint8_t mcp25xxfd_config_osc() {
-  union SpiRegister info = {0};
   // Set OSC
-  info.data.body.byte[0] = 0x0; // no PLL, no LP, no clock divisers
+  REG_OSC osc = {0};
+  osc.bF.PllEnable = 0;  // 0: no PLL, 1: sysclk from 10x PLL
+  osc.bF.OscDisable = 0; // 0: Enable clock, 1: Clock disabled
+  osc.bF.LowPowerModeEnable = 0;
+  osc.bF.SCLKDIV = 0; // 0: divided by 1, 1: divided by 2
+  osc.bF.CLKODIV = OSC_CLKO_DIV1;
+  osc.bF.PllReady = 0; // 0: PLL not ready, 1: PLL locked
+  osc.bF.OscReady = 0; //
+  union SpiRegister info = {0};
+  info.data.body.word = osc.word;
   mcp25xxfd_write_register(cREGADDR_OSC, &info, 1);
   // check OSC status
   mcp25xxfd_read_register(cREGADDR_OSC, &info, 2);
@@ -452,29 +466,70 @@ uint8_t mcp25xxfd_config_io() {
   return 0;
 }
 
+// calculate propagation delay in ns
+static uint32_t get_propergation_delay(uint32_t bus_meters) {
+  const uint32_t kTxTranceiver = 100;   // ns, from TCAN3413 DS
+  const uint32_t kRxTranceiver = 90;    // ns, from TCAN3413 DS
+  const uint32_t kBusDelayPerMeter = 5; // ns, based on 2/3 the speed of light
+
+  return 2 * (kBusDelayPerMeter * bus_meters + kTxTranceiver + kRxTranceiver);
+}
+
 uint8_t mcp25xxfd_config_bit_time() {
   union SpiRegister info = {0};
-  // Bit timing for NBR 1Mbps, DBR 4Mbps, Fsys=20MHz
+
+  const uint32_t kFsys = 20 * 1000 * 1000;
+  const uint32_t kNbr = 1 * 1000 * 1000; // nominal bit rate
+  const uint32_t kDbr = 4 * 1000 * 1000; // data bit rate
+  const uint32_t kNbrp = 1;              // baud rate prescaler
+  const uint32_t kDbrp = 1;              // baud rate prescaler
+  const uint32_t kBusMeters = 10;
+  const uint32_t kNsync = 1;
+  const uint32_t kNsp = 80;
+
+  uint32_t time_prop_seg = get_propergation_delay(kBusMeters);
+
+  // Nominal bit timing
+  uint32_t ntq = kNbrp * 1000000000 / kFsys; // time quanta in nano sec
+  uint32_t nbt = 1000000000 / kNbr;          // ns
+  uint32_t num_ntq = nbt / ntq;
+  uint32_t num_nprseg = (time_prop_seg + ntq - 1) / ntq;
+  uint32_t ntseg1 = kNsp * num_ntq / 100 - 1;
+  uint32_t ntseg2 = num_ntq - kNsync - ntseg1;
+  uint32_t nsjw = MIN(ntseg1 - num_nprseg, ntseg2);
+
+  // Data bit timing
+  uint32_t dtq = kDbrp * 1000000000 / kFsys; // time quanta in nano sec
+  uint32_t dbt = 1000000000 / kDbr;          // ns
+  uint32_t num_dtq = dbt / dtq;
+  uint32_t dtseg1 = kNsp * num_dtq / 100 - 1;
+  uint32_t dtseg2 = num_dtq - kNsync - dtseg1;
+  uint32_t dsjw = MIN(dtseg1, dtseg2);
+  uint32_t tdco = kDbrp * dtseg1;
+
+  // uint32_t nominal_time_quanta = nBrp
   REG_CiNBTCFG nbt_config = {0};
-  nbt_config.bF.BRP = 0;
-  nbt_config.bF.TSEG1 = 14;
-  nbt_config.bF.TSEG2 = 3;
-  nbt_config.bF.SJW = 3;
+  nbt_config.bF.BRP = kNbrp - 1;
+  nbt_config.bF.TSEG1 = ntseg1 - 1;
+  nbt_config.bF.TSEG2 = ntseg2 - 1;
+  nbt_config.bF.SJW = nsjw - 1;
+
   info.data.body.word = nbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiNBTCFG, &info, 4);
 
   REG_CiDBTCFG dbt_config = {0};
   REG_CiTDC tdc_config = {0};
-  dbt_config.bF.BRP = 0;
-  dbt_config.bF.TSEG1 = 2;
-  dbt_config.bF.TSEG2 = 0;
-  dbt_config.bF.SJW = 0;
-  tdc_config.bF.TDCMode = CAN_SSP_MODE_AUTO;
-  tdc_config.bF.TDCOffset = 3;
-  tdc_config.bF.TDCValue = 0;
+  dbt_config.bF.BRP = kDbrp - 1;
+  dbt_config.bF.TSEG1 = dtseg1 - 1;
+  dbt_config.bF.TSEG2 = dtseg2 - 1;
+  dbt_config.bF.SJW = dsjw - 1;
 
   info.data.body.word = dbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiDBTCFG, &info, 4);
+
+  tdc_config.bF.TDCMode = CAN_SSP_MODE_AUTO;
+  tdc_config.bF.TDCOffset = tdco;
+  tdc_config.bF.TDCValue = 0;
 
   info.data.body.word = tdc_config.word;
   mcp25xxfd_write_register(cREGADDR_CiTDC, &info, 4);
