@@ -413,7 +413,19 @@ void can_send_message(can_message_t *message) {
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
   union RegisterSpiObject reg;
-  uint16_t register_address = cREGADDR_CiFIFOUA + channel * CiFIFO_OFFSET;
+
+  // Wait until until the FIFO has a space to put message
+  uint16_t register_address = cREGADDR_CiFIFOSTA + channel * CiFIFO_OFFSET;
+  while (1) {
+    mcp25xxfd_read_register(register_address, &reg, 1);
+    if (reg.data.body.byte[0] & CAN_TX_FIFO_NOT_FULL) { // checking TFNRFNIF
+      break;
+    }
+    // TODO: return an error on timeout
+  }
+
+  // Get the next FIFO address
+  register_address = cREGADDR_CiFIFOUA + channel * CiFIFO_OFFSET;
   mcp25xxfd_read_register(register_address, &reg, 2);
   uint16_t fifo_address = reg.data.body.word + cRAMADDR_START;
   size_t bytes_to_send = 10 + (dlc + 3) / 4 * 4;
@@ -421,7 +433,7 @@ void can_send_message(can_message_t *message) {
   tx->data.header[1] = fifo_address & 0xff;
   platform_write_spi(tx->buffer, bytes_to_send);
 
-  // flush
+  // Flush
   register_address = cREGADDR_CiFIFOCON + (channel * CiFIFO_OFFSET) + 1;
   reg.data.body.byte[0] = 0x3; // UINC + TXREQ
   mcp25xxfd_write_register(register_address, &reg, 1);
