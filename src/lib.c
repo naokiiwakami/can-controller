@@ -32,7 +32,7 @@ int platform_init_spi(const can_config_t *config) {
     fprintf(stderr, "WiringPi setup failed\n");
     return 1;
   }
-  if (wiringPiSPISetup(SPI_CHANNEL, config->spi_speed_hz) == -1) {
+  if (wiringPiSPISetup(SPI_CHANNEL, config->system.spi_speed_hz) == -1) {
     fprintf(stderr, "SPI setup failed\n");
     return 1;
   }

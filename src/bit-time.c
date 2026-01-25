@@ -12,8 +12,8 @@ uint32_t can_bt_get_propergation_delay(const can_bt_config_t *config) {
 int32_t can_bt_calculate_bit_time_params(can_bt_params_t *params,
                                          const can_bt_source_t *src,
                                          uint32_t propergation_delay) {
-  uint32_t tq = kTrilion / src->clock;    // time quanta in nano sec
-  uint32_t bt = kTrilion / src->bit_rate; // ns
+  uint32_t tq = kTrilion / src->sys_clock; // time quanta in nano sec
+  uint32_t bt = kTrilion / src->bit_rate;  // ns
   params->num_tq = bt / tq;
   params->prseg = (propergation_delay + tq - 1) / tq;
   params->tseg1 = src->split_point * params->num_tq / 100 - 1;

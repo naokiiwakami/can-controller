@@ -19,19 +19,28 @@
 
 #if defined(MCP2518FD) || defined(MCP2517)
 #include "can-controller/device/mcp25xxfd_config.h"
-#define DEVICE_CONFIG_T mcp25xxfd_config_t
+#define DEVICE_CAN_CONFIG_T mcp25xxfd_can_config_t
+#define DEVICE_SYSTEM_CONFIG_T mcp25xxfd_system_config_t
 #endif
 #if defined(MCP2515)
 #include "can-controller/device/mcp2515_config.h"
-#define DEVICE_CONFIG_T mcp2515_config_t
+#define DEVICE_CAN_CONFIG_T mcp2515_can_config_t
+#define DEVICE_SYSTEM_CONFIG_T mcp2515_system_config_t
 #endif
 
-typedef struct can_config {
+typedef struct system_config {
+  uint32_t osc_clock_hz;
   uint32_t spi_speed_hz;
 
-  can_bt_config_t bt_config;
+  DEVICE_SYSTEM_CONFIG_T device;
+} can_system_config_t;
 
-  DEVICE_CONFIG_T device;
+typedef struct can_config {
+  can_system_config_t system;
+
+  can_bt_config_t bit_time;
+
+  DEVICE_CAN_CONFIG_T device;
 } can_config_t;
 
 #endif // CAN_CONTROLLER_CONFIGURATION_H_

@@ -10,7 +10,7 @@
  * bit time calculation source.
  */
 typedef struct can_bit_time_source {
-  uint32_t clock;       // in Hz
+  uint32_t sys_clock;   // in Hz, do not modify this directly
   uint32_t bit_rate;    // target bit rate in bps
   uint32_t split_point; // in percent
 } can_bt_source_t;

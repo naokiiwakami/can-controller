@@ -29,11 +29,18 @@ extern void can_send_message(can_message_t *message);
 ////////////////////////////////////////////////////////////////
 
 /**
- * Create default configuration.
+ * Create a default system configuration object.
+ */
+extern can_system_config_t can_make_default_system_config();
+
+/**
+ * Create a default configuration object.
  *
+ * @param sys_config system configuration
  * @returns default configuration
  */
-extern can_config_t can_make_default_config();
+extern can_config_t
+can_make_default_config(const can_system_config_t *sys_config);
 
 /**
  * Sets bitrate.

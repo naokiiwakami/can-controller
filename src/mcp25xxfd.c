@@ -78,7 +78,7 @@ static uint8_t mcp25xxfd_config_io();
 static uint8_t mcp25xxfd_config_bit_time(const can_config_t *config);
 static uint8_t mcp25xxfd_config_interrupt();
 static uint8_t mcp25xxfd_config_can_control(const can_config_t *config);
-static uint8_t mcp25xxfd_config_txfifo();
+static uint8_t mcp25xxfd_can_config_txfifo();
 static uint8_t mcp25xxfd_config_rxfifo();
 static uint8_t mcp25xxfd_config_default_filter();
 static uint8_t mcp25xxfd_change_mode(uint8_t mode);
@@ -91,72 +91,83 @@ static void dump_filter(CAN_FILTER channel);
 
 // Implementation of API methods ///////////////////////////////////
 
-can_config_t can_make_default_config() {
-  can_config_t config = {0};
+can_system_config_t can_make_default_system_config() {
+  can_system_config_t sys_config = {0};
+
+  // oscillator config
+  sys_config.osc_clock_hz = 20000000;
+  sys_config.device.osc_pll_enabled = 0;
+
   // 16MHz, The device accepts up to 20MHz but frequent communication errors
   // occur with the rate.
-  config.spi_speed_hz = 16000000;
+  sys_config.spi_speed_hz = 16000000;
+
+  return sys_config;
+}
+
+can_config_t can_make_default_config(const can_system_config_t *system_config) {
+  can_config_t config = {0};
+
+  // copy the system configuration
+  config.system = *system_config;
 
   // CAN controller
   config.device.fd_mode = 1;
   config.device.brs_enabled = 1;
 
-  // oscillator config
-  config.device.osc_clock_hz = 20000000;
-  config.device.pll_enabled = 0;
-
   // bit time config sources
-  config.bt_config.bus_length = 10;
-  config.bt_config.tx_propergation_delay = 100; // from TCAN3413 datasheet
-  config.bt_config.rx_propergation_delay = 90;  // from TCAN3413 datasheet
+  config.bit_time.bus_length = 10;
+  config.bit_time.tx_propergation_delay = 100; // from TCAN3413 datasheet
+  config.bit_time.rx_propergation_delay = 90;  // from TCAN3413 datasheet
 
   config.device.nominal_baud_rate_prescale = 1;
   config.device.data_baud_rate_prescale = 1;
 
-  uint32_t sys_clock =
-      config.device.osc_clock_hz * (config.device.pll_enabled ? 10 : 1);
-  uint32_t propergation_delay =
-      can_bt_get_propergation_delay(&config.bt_config);
+  uint32_t sys_clock = config.system.osc_clock_hz *
+                       (config.system.device.osc_pll_enabled ? 10 : 1);
+  fprintf(stderr, "sys clock=%u MHz\n", sys_clock / 1000 / 1000);
 
-  config.bt_config.nominal_bt_src.bit_rate = 1000000;
-  config.bt_config.nominal_bt_src.split_point = 80;
-  config.bt_config.nominal_bt_src.clock =
+  uint32_t propergation_delay = can_bt_get_propergation_delay(&config.bit_time);
+
+  config.bit_time.nominal_bt_src.sys_clock =
       sys_clock / config.device.nominal_baud_rate_prescale;
-  can_bt_calculate_bit_time_params(&config.bt_config.nominal_bt_params,
-                                   &config.bt_config.nominal_bt_src,
+  config.bit_time.nominal_bt_src.bit_rate = 1000000;
+  config.bit_time.nominal_bt_src.split_point = 80;
+  can_bt_calculate_bit_time_params(&config.bit_time.nominal_bt_params,
+                                   &config.bit_time.nominal_bt_src,
                                    propergation_delay);
 
-  config.bt_config.data_bt_src.bit_rate = 4000000;
-  config.bt_config.data_bt_src.split_point = 80;
-  config.bt_config.data_bt_src.clock =
-      sys_clock / config.device.data_baud_rate_prescale;
-  can_bt_calculate_bit_time_params(&config.bt_config.data_bt_params,
-                                   &config.bt_config.data_bt_src,
+  config.bit_time.data_bt_src.sys_clock =
+      sys_clock / config.device.nominal_baud_rate_prescale;
+  config.bit_time.data_bt_src.bit_rate = 4000000;
+  config.bit_time.data_bt_src.split_point = 80;
+  can_bt_calculate_bit_time_params(&config.bit_time.data_bt_params,
+                                   &config.bit_time.data_bt_src,
                                    propergation_delay);
 
   return config;
 }
 
 int can_set_bitrate(can_config_t *config, uint32_t bitrate) {
-  config->bt_config.nominal_bt_src.bit_rate = bitrate;
+  config->bit_time.nominal_bt_src.bit_rate = bitrate;
 
   uint32_t propergation_delay =
-      can_bt_get_propergation_delay(&config->bt_config);
-  can_bt_calculate_bit_time_params(&config->bt_config.nominal_bt_params,
-                                   &config->bt_config.nominal_bt_src,
+      can_bt_get_propergation_delay(&config->bit_time);
+  can_bt_calculate_bit_time_params(&config->bit_time.nominal_bt_params,
+                                   &config->bit_time.nominal_bt_src,
                                    propergation_delay);
   return 0;
 }
 
 int can_set_fd_data_bitrate(can_config_t *config, uint32_t bitrate) {
-  config->bt_config.data_bt_src.bit_rate = bitrate;
+  config->bit_time.data_bt_src.bit_rate = bitrate;
   config->device.fd_mode = 1;
   config->device.brs_enabled = 1;
 
   uint32_t propergation_delay =
-      can_bt_get_propergation_delay(&config->bt_config);
-  can_bt_calculate_bit_time_params(&config->bt_config.data_bt_params,
-                                   &config->bt_config.data_bt_src,
+      can_bt_get_propergation_delay(&config->bit_time);
+  can_bt_calculate_bit_time_params(&config->bit_time.data_bt_params,
+                                   &config->bit_time.data_bt_src,
                                    propergation_delay);
   return 0;
 }
@@ -178,7 +189,7 @@ uint8_t device_init(can_config_t *config) {
   if (mcp25xxfd_config_can_control(config)) {
     return 1;
   }
-  if (mcp25xxfd_config_txfifo()) {
+  if (mcp25xxfd_can_config_txfifo()) {
     return 1;
   }
   if (mcp25xxfd_config_rxfifo()) {
@@ -499,15 +510,16 @@ void mcp25xxfd_reset() {
 uint8_t mcp25xxfd_config_osc(can_config_t *config) {
   // Set OSC
   REG_OSC osc = {0};
-  osc.bF.PllEnable =
-      config->device.pll_enabled; // 0: no PLL, 1: sysclk from 10x PLL
-  osc.bF.OscDisable = 0;          // 0: Enable clock, 1: Clock disabled
+  uint8_t pll_enabled = config->system.device.osc_pll_enabled;
+  osc.bF.PllEnable = pll_enabled ? 1 : 0; // 0: no PLL, 1: sysclk from 10x PLL
+  osc.bF.OscDisable = 0;                  // 0: Enable clock, 1: Clock disabled
   osc.bF.LowPowerModeEnable = 0;
   osc.bF.SCLKDIV = 0; // 0: divided by 1, 1: divided by 2
   osc.bF.CLKODIV = OSC_CLKO_DIV1;
   union RegisterSpiObject info = {0};
   info.data.body.word = osc.word;
   mcp25xxfd_write_register(cREGADDR_OSC, &info, 1);
+  platform_sleep_ms(10);
   // check OSC status
   mcp25xxfd_read_register(cREGADDR_OSC, &info, 2);
   if ((info.data.body.byte[1] & 0x4) == 0) {
@@ -518,8 +530,8 @@ uint8_t mcp25xxfd_config_osc(can_config_t *config) {
     fprintf(stderr, "System clock divisor is ON wrongfully\n");
     return 1;
   }
-  if (info.data.body.byte[1] & 0x1) {
-    fprintf(stderr, "PLL is ON wrongfully\n");
+  if ((info.data.body.byte[1] & 0x1) ^ pll_enabled) {
+    fprintf(stderr, "PLL is %s wrongfully\n", pll_enabled ? "OFF" : "ON");
     return 1;
   }
   return 0;
@@ -537,6 +549,7 @@ uint8_t mcp25xxfd_config_io() {
   io_con.bF.LAT0 = 1;
   io_con.bF.GPIO0 = 1;
   io_con.bF.TRIS0 = 1;
+  io_con.bF.SOFOutputEnable = 0;
 
   info.data.body.word = io_con.word;
   mcp25xxfd_write_register(cREGADDR_IOCON, &info, 4);
@@ -553,14 +566,14 @@ uint8_t mcp25xxfd_config_bit_time(const can_config_t *config) {
   union RegisterSpiObject info = {0};
 
   uint32_t tdco = config->device.data_baud_rate_prescale *
-                  config->bt_config.data_bt_params.tseg1;
+                  config->bit_time.data_bt_params.tseg1;
 
   // uint32_t nominal_time_quanta = nBrp
   REG_CiNBTCFG nbt_config = {0};
   nbt_config.bF.BRP = config->device.nominal_baud_rate_prescale - 1;
-  nbt_config.bF.TSEG1 = config->bt_config.nominal_bt_params.tseg1 - 1;
-  nbt_config.bF.TSEG2 = config->bt_config.nominal_bt_params.tseg2 - 1;
-  nbt_config.bF.SJW = config->bt_config.nominal_bt_params.sjw - 1;
+  nbt_config.bF.TSEG1 = config->bit_time.nominal_bt_params.tseg1 - 1;
+  nbt_config.bF.TSEG2 = config->bit_time.nominal_bt_params.tseg2 - 1;
+  nbt_config.bF.SJW = config->bit_time.nominal_bt_params.sjw - 1;
 
   info.data.body.word = nbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiNBTCFG, &info, 4);
@@ -568,9 +581,9 @@ uint8_t mcp25xxfd_config_bit_time(const can_config_t *config) {
   REG_CiDBTCFG dbt_config = {0};
   REG_CiTDC tdc_config = {0};
   dbt_config.bF.BRP = config->device.data_baud_rate_prescale - 1;
-  dbt_config.bF.TSEG1 = config->bt_config.data_bt_params.tseg1 - 1;
-  dbt_config.bF.TSEG2 = config->bt_config.data_bt_params.tseg2 - 1;
-  dbt_config.bF.SJW = config->bt_config.data_bt_params.sjw - 1;
+  dbt_config.bF.TSEG1 = config->bit_time.data_bt_params.tseg1 - 1;
+  dbt_config.bF.TSEG2 = config->bit_time.data_bt_params.tseg2 - 1;
+  dbt_config.bF.SJW = config->bit_time.data_bt_params.sjw - 1;
 
   info.data.body.word = dbt_config.word;
   mcp25xxfd_write_register(cREGADDR_CiDBTCFG, &info, 4);
@@ -613,7 +626,7 @@ uint8_t mcp25xxfd_config_can_control(const can_config_t *config) {
   return 0;
 }
 
-uint8_t mcp25xxfd_config_txfifo() {
+uint8_t mcp25xxfd_can_config_txfifo() {
   // Use FIFO1 for TX
   CAN_FIFO_CHANNEL channel = CAN_FIFO_CH1;
 
